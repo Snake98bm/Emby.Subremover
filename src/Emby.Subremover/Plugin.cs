@@ -3,28 +3,65 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Emby.Subremover.Core;
+using Emby.Subremover.ScheduledTasks;
 using Emby.Web.GenericEdit.Common;
+using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Common;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
-using MediaBrowser.Model.Drawing;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Drawing;
+using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Plugins;
+using MediaBrowser.Model.Plugins.UI;
+using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Tasks;
 
 namespace Emby.Subremover
 {
-    public class Plugin : BasePluginSimpleUI<PluginOptions>, IHasThumbImage
+    public class Plugin : BasePlugin, IHasUIPages, IHasThumbImage
     {
+        private readonly IApplicationHost _applicationHost;
         private readonly ILibraryManager _libraryManager;
+        private readonly OptionsStore _store;
+        private readonly StateStore _state;
+        private readonly string _logDirectory;
+        private readonly List<IPluginUIPageController> _pages;
 
-        public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager) : base(applicationHost)
+        public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager)
         {
+            _applicationHost = applicationHost;
             _libraryManager = libraryManager;
+            _store = new OptionsStore(
+                applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath,
+                SettingsFileName,
+                applicationHost.Resolve<IJsonSerializer>(),
+                applicationHost.Resolve<ILogManager>().GetLogger(Name));
+            _logDirectory = applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath;
+            _state = new StateStore(applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, applicationHost.Resolve<IJsonSerializer>());
+            _pages = new List<IPluginUIPageController>
+            {
+                SettingsPageController.ForPluginList(this, Name),
+                SettingsPageController.ForSidebar(this, Name, () => Options.ShowInSidebar)
+            };
             Instance = this;
         }
 
         public static Plugin Instance { get; private set; }
 
-        public override string Name => "Subremover";
+        // The settings file keeps the name earlier versions used, so saved settings carry over after the rename.
+        private const string SettingsFileName = "Subremover";
+
+        public static string VersionText
+        {
+            get
+            {
+                var v = typeof(Plugin).Assembly.GetName().Version;
+                return $"{v.Major}.{v.Minor}.{v.Build}";
+            }
+        }
+
+        public override string Name => "SubRemover";
 
         public override string Description => "Removes unwanted embedded subtitle tracks from video files, with test mode and backups.";
 
@@ -34,30 +71,82 @@ namespace Emby.Subremover
 
         public Stream GetThumbImage() => GetType().Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
 
-        public PluginOptions Options => GetOptions();
+        public IReadOnlyCollection<IPluginUIPageController> UIPageControllers => _pages.AsReadOnly();
 
-        public void Save(PluginOptions options) => SaveOptions(options);
+        public PluginOptions Options => _store.Get();
 
-        protected override PluginOptions OnBeforeShowUI(PluginOptions options)
+        internal PluginOptions OptionsForEditing() => _store.GetCopy();
+
+        public void Save(PluginOptions options) => _store.Save(options);
+
+        public override PluginInfo GetPluginInfo()
+        {
+            var info = base.GetPluginInfo();
+            info.ConfigurationFileName = _store.FilePath;
+            return info;
+        }
+
+        // The task manager is looked up when needed rather than at startup, when not every service is ready yet.
+        private IScheduledTaskWorker RemoveTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is RemoveSubtitlesTask);
+
+        /// <returns>The status line to show after the click.</returns>
+        internal StatusItem RunNow()
+        {
+            var worker = RemoveTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return CurrentStatus();
+
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RemoveSubtitlesTask>();
+            return RunStatus.Started(DateTime.Now);
+        }
+
+        // Never let a status problem stop the settings page from opening.
+        internal StatusItem CurrentStatus()
+        {
+            try
+            {
+                var worker = RemoveTaskWorker();
+                return RunStatus.Describe(worker?.State, worker?.CurrentProgress, worker?.LastExecutionResult, _state.Load().LastRun);
+            }
+            catch (Exception ex)
+            {
+                return new StatusItem("Status", "Status unavailable: " + ex.Message, ItemStatus.Unknown);
+            }
+        }
+
+        internal static void ApplyQuickSetup(PluginOptions options)
+        {
+            options.KeepLanguages = "eng";
+            options.KeepUndefined = true;
+        }
+
+        internal PluginOptions PrepareForDisplay(PluginOptions options)
         {
             options.LibraryChoices = _libraryManager.GetVirtualFolders()
                 .Where(f => f.CollectionType != "music" && f.CollectionType != "books" && f.CollectionType != "photos")
                 .Select(f => new EditorSelectOption { Value = f.ItemId, Name = f.Name, IsEnabled = true })
                 .ToList();
-
             options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
-            return base.OnBeforeShowUI(options);
+            options.RunStatus = CurrentStatus();
+            options.SelectedLog = null;
+            ShowLog(options);
+            return options;
         }
 
-        protected override bool OnOptionsSaving(PluginOptions options)
+        /// <summary>Fills the log list and shows the selected run log, or the newest when none is selected.</summary>
+        internal void ShowLog(PluginOptions options)
         {
-            if (options.ApplyEnglishPreset)
+            try
             {
-                options.KeepLanguages = "eng";
-                options.KeepUndefined = true;
-                options.ApplyEnglishPreset = false;
+                var files = RunLog.ListFiles(_logDirectory);
+                options.LogChoices = files.Select(f => new EditorSelectOption { Value = f, Name = f, IsEnabled = true }).ToList();
+                if (!files.Contains(options.SelectedLog)) options.SelectedLog = files.FirstOrDefault();
+                options.LogText = RunLog.ReadForDisplay(_logDirectory, options.SelectedLog);
             }
-            return base.OnOptionsSaving(options);
+            catch (Exception ex)
+            {
+                options.LogText = "Couldn't read the run log: " + ex.Message;
+            }
         }
 
         // Codes saved earlier that aren't in the standard list stay selectable, so saving never drops them.

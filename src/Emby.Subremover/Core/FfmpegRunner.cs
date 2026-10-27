@@ -51,7 +51,10 @@ namespace Emby.Subremover.Core
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                RedirectStandardInput = false
+                RedirectStandardInput = false,
+                // ffmpeg writes UTF-8; without this Windows decodes it with the ANSI code page ("Español" -> "EspaÃ±ol").
+                StandardOutputEncoding = new UTF8Encoding(false),
+                StandardErrorEncoding = new UTF8Encoding(false)
             };
             foreach (var variable in _environment())
             {

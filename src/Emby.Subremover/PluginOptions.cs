@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Emby.Subremover.Core;
 using Emby.Web.GenericEdit;
 using Emby.Web.GenericEdit.Common;
+using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Model.Attributes;
 
 namespace Emby.Subremover
@@ -13,17 +14,28 @@ namespace Emby.Subremover
         Replace
     }
 
-    // Emby builds the plugin's settings page automatically from these properties.
+    // Emby builds the plugin's settings page from these properties, in this order.
     public class PluginOptions : EditableOptionsBase
     {
-        public override string EditorTitle => "Subremover";
+        public override string EditorTitle => "SubRemover v" + Plugin.VersionText;
 
         public override string EditorDescription =>
-            "Removes unwanted embedded subtitle tracks from your videos. Run it from Scheduled Tasks → Subremover. " +
-            "Leave Test mode on for your first run and check the Emby log to see what would change.";
+            "Removes unwanted embedded subtitle tracks from your videos. Leave Test mode on for your first run, " +
+            "then check the subremover log under Settings → Logs to see what would change.";
+
+        [DisplayName("")]
+        [Description("Saves your settings, then starts the task. You can also run it from Scheduled Tasks → SubRemover.")]
+        public ButtonItem RunNowButton { get; set; } = new ButtonItem("Run now")
+        {
+            CommandId = SettingsPageView.RunNowCommand,
+            Icon = IconNames.play_arrow
+        };
+
+        [DisplayName("")]
+        public StatusItem RunStatus { get; set; } = new StatusItem("Status", "Not run yet");
 
         [DisplayName("Test mode (dry run)")]
-        [Description("When on, nothing is changed: the task only writes to the Emby server log what it WOULD do. Turn off when the log looks right.")]
+        [Description("When on, nothing is changed: the task only writes to its log (Settings → Logs → subremover-…) what it WOULD do. Turn off when the log looks right.")]
         public bool DryRun { get; set; } = true;
 
         [DisplayName("Libraries to process")]
@@ -35,9 +47,13 @@ namespace Emby.Subremover
         [Browsable(false)]
         public List<EditorSelectOption> LibraryChoices { get; set; } = new List<EditorSelectOption>();
 
-        [DisplayName("Quick setup: keep English and subtitles with no language")]
-        [Description("Tick this and click Save to select only English below and turn on 'Keep subtitles with no language set'. It unticks itself afterwards.")]
-        public bool ApplyEnglishPreset { get; set; }
+        [DisplayName("")]
+        [Description("Selects only English below, turns on 'Keep subtitles with no language set', and saves.")]
+        public ButtonItem QuickSetupButton { get; set; } = new ButtonItem("Quick setup: English + no language")
+        {
+            CommandId = SettingsPageView.QuickSetupCommand,
+            Icon = IconNames.language
+        };
 
         [DisplayName("Subtitle languages to keep")]
         [Description("Tick every language you want to keep. Embedded subtitles in any language that isn't ticked are removed. Matches all spellings, e.g. ger, deu and de.")]
@@ -56,8 +72,12 @@ namespace Emby.Subremover
         public bool KeepForcedAnyLanguage { get; set; }
 
         [DisplayName("Remove SDH / hearing-impaired subtitles")]
-        [Description("Removes them even when they are in a language you keep.")]
+        [Description("Removes them when a regular subtitle track in the same language stays. If SDH is the only track in a language you keep, it stays.")]
         public bool RemoveHearingImpaired { get; set; }
+
+        [DisplayName("Remove commentary subtitles")]
+        [Description("Removes subtitle tracks marked as commentary or titled 'Commentary', even when they are in a language you keep.")]
+        public bool RemoveCommentary { get; set; }
 
         [DisplayName("Extract kept text subtitles to .srt files")]
         [Description("Saves kept text subtitles (SRT/ASS/etc.) as files next to the video, which Emby picks up as external subtitles. Picture-based subtitles (PGS/VobSub) can't be extracted to text.")]
@@ -97,12 +117,44 @@ namespace Emby.Subremover
         public int MaxItemsPerRun { get; set; } = 5;
 
         [DisplayName("Only process paths containing")]
-        [Description("Optional. e.g. a single movie folder name, to test on one title.")]
+        [Description("Optional. Only videos whose full path contains this text are processed (or restored); capitals don't matter. " +
+                     "Example: 'Batman Begins (2005)' matches only that movie, '\\Movies\\' matches only your Movies folder. Leave empty for everything.")]
         public string OnlyPathContains { get; set; } = string.Empty;
 
+        [DisplayName("Show in the server sidebar menu")]
+        [Description("Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. Reload the page (or restart Emby) after changing this.")]
+        public bool ShowInSidebar { get; set; } = true;
+
         [DisplayName("Re-check every video on next run")]
-        [Description("Forgets which files were already processed. Switches itself back off after the run.")]
+        [Description("Forgets which files were already processed, including videos you restored from backups. Switches itself back off after the run.")]
         [IsAdvanced]
         public bool ReprocessAll { get; set; }
+
+        [DisplayName("")]
+        public CaptionItem LogsCaption { get; set; } = new CaptionItem("Run logs");
+
+        [DisplayName("Run log")]
+        [Description("Shows the last run. Pick an older run to see its log. The newest 30 are kept.")]
+        [SelectItemsSource(nameof(LogChoices))]
+        [AutoPostBack(SettingsPageView.ShowLogCommand, nameof(SelectedLog))]
+        public string SelectedLog { get; set; }
+
+        [Browsable(false)]
+        public List<EditorSelectOption> LogChoices { get; set; } = new List<EditorSelectOption>();
+
+        [DisplayName("")]
+        [Description("Read only: anything typed here is not saved.")]
+        [EditMultiline(20)]
+        public string LogText { get; set; }
+
+        /// <summary>Drops the lists and log text that are only filled in for display, so they never go into the settings file.</summary>
+        internal void ClearDisplayOnlyFields()
+        {
+            LibraryChoices = new List<EditorSelectOption>();
+            LanguageChoices = new List<EditorSelectOption>();
+            LogChoices = new List<EditorSelectOption>();
+            SelectedLog = null;
+            LogText = null;
+        }
     }
 }

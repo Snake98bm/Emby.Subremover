@@ -71,10 +71,13 @@ namespace Emby.Subremover.Core
             var temp = job.OutputPath + ".subremover-tmp";
             var result = await runner.RunFfmpeg(FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temp), ct, tessdata.Root).ConfigureAwait(false);
 
-            if (!result.Success || !File.Exists(temp) || new FileInfo(temp).Length == 0)
+            var failure = !result.Success
+                ? $"ffmpeg OCR failed (exit {result.ExitCode}): {result.StdErr}"
+                : OutputChecks.TruncationMessage(result.StdErr) ?? OutputChecks.CheckSubtitleFile(temp, job.Stream, isAss: false, compareCount: false);
+            if (failure != null)
             {
                 BackupManager.TryDelete(temp);
-                return $"ffmpeg OCR failed (exit {result.ExitCode}): {result.StdErr}";
+                return failure;
             }
 
             if (File.Exists(job.OutputPath)) File.Delete(job.OutputPath);

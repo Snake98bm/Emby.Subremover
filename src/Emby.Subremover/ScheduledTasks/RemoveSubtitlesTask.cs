@@ -21,62 +21,103 @@ namespace Emby.Subremover.ScheduledTasks
     public class RemoveSubtitlesTask : IScheduledTask
     {
         private readonly ILibraryManager _libraryManager;
-        private readonly ILogger _log;
+        private readonly ILogger _embyLog;
+        private readonly string _logDirectory;
         private readonly StateStore _store;
-        private readonly MediaProcessor _processor;
+        private readonly Func<ILogger, MediaProcessor> _newProcessor;
+        private ILogger _log;
 
         public RemoveSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
             ILibraryMonitor libraryMonitor, IProviderManager providerManager, IFileSystem fileSystem,
             IJsonSerializer json, IApplicationPaths appPaths)
         {
             _libraryManager = libraryManager;
-            _log = logManager.GetLogger("Subremover");
+            _embyLog = logManager.GetLogger("SubRemover");
+            _log = _embyLog;
+            _logDirectory = appPaths.LogDirectoryPath;
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
-            _processor = new MediaProcessor(FfmpegRunner.FromEmby(ffmpegManager), libraryMonitor, providerManager, fileSystem, json, _log,
-                new Tessdata(Path.Combine(appPaths.DataPath, "subremover")));
+            var runner = FfmpegRunner.FromEmby(ffmpegManager);
+            var tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
+            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata);
         }
 
         public string Name => "Remove unwanted subtitles";
         public string Key => "SubremoverRemoveSubtitles";
-        public string Description => "Removes embedded subtitle tracks that aren't in your kept languages. Configure under Plugins → Subremover.";
-        public string Category => "Subremover";
+        public string Description => "Removes embedded subtitle tracks that aren't in your kept languages. Configure under Plugins → SubRemover.";
+        public string Category => "SubRemover";
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            using (var runLog = new RunLog(_logDirectory, "subremover", _embyLog))
+            {
+                if (!TaskGate.TryEnter())
+                {
+                    const string busy = "another SubRemover task (restore) is running - try again when it has finished";
+                    runLog.Summary("SubRemover: {0}", busy);
+                    var state = _store.Load();
+                    state.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, Problem = busy, LogFile = runLog.FileName };
+                    _store.Save(state);
+                    return;
+                }
+
+                _log = runLog;
+                try
+                {
+                    await Run(runLog, cancellationToken, progress).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _log = _embyLog;
+                    TaskGate.Exit();
+                }
+            }
+        }
+
+        private async Task Run(RunLog runLog, CancellationToken cancellationToken, IProgress<double> progress)
+        {
             var options = Plugin.Instance.Options;
+            var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-            _log.Info("Subremover {0} starting{1}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "");
+            runLog.Summary("SubRemover {0} starting{1}. Details: {2}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
 
             var problem = Validate(options);
             if (problem != null)
             {
-                _log.Error("Subremover: {0}. Fix it under Plugins → Subremover.", problem);
+                _log.Error("SubRemover: {0}. Fix it under Plugins → SubRemover.", problem);
+                var failedState = _store.Load();
+                failedState.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, DryRun = options.DryRun, Problem = problem, LogFile = runLog.FileName };
+                _store.Save(failedState);
                 return;
             }
 
             var state = _store.Load();
+            if (state.InProgress != null)
+            {
+                foreach (var file in Leftovers.Clean(state.InProgress)) _log.Info("SubRemover: deleted leftover {0} from an interrupted run", file);
+                state.InProgress = null;
+                _store.Save(state);
+            }
+
             if (options.ReprocessAll && !options.DryRun)
             {
-                _log.Info("Subremover: 'Re-check every video' is on - clearing the processed list");
-                state.Processed.Clear();
+                _log.Info("SubRemover: 'Re-check every video' is on - clearing the processed and restored lists");
+                state.ForgetEverything();
                 _store.Save(state);
                 options.ReprocessAll = false;
                 Plugin.Instance.Save(options);
             }
 
             var signature = MediaProcessor.SettingsFrom(options).Signature();
-            if (!options.DryRun && state.SettingsSignature != signature)
+            if (!options.DryRun && state.ApplySettingsSignature(signature))
             {
-                if (state.Processed.Count > 0) _log.Info("Subremover: settings changed since the last run - checking every video again");
-                state.Processed.Clear();
-                state.SettingsSignature = signature;
-                _store.Save(state);
+                _log.Info("SubRemover: settings changed since the last run - checking every video again (restored videos stay untouched)");
             }
+            if (!options.DryRun) _store.Save(state);
 
             var items = FindVideos(options);
-            _log.Info("Subremover: {0} video files to check", items.Count);
+            _log.Info("SubRemover: {0} video files to check", items.Count);
 
             var counts = Enum.GetValues(typeof(Outcome)).Cast<Outcome>().ToDictionary(o => o, o => 0);
             var changes = 0;
@@ -88,7 +129,7 @@ namespace Emby.Subremover.ScheduledTasks
                 Outcome outcome;
                 try
                 {
-                    outcome = await _processor.Process(items[i], options, state, _store, cancellationToken).ConfigureAwait(false);
+                    outcome = await processor.Process(items[i], options, state, _store, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -96,7 +137,7 @@ namespace Emby.Subremover.ScheduledTasks
                 }
                 catch (Exception ex)
                 {
-                    _log.ErrorException("Subremover: unexpected error on {0}", ex, items[i].Path);
+                    _log.ErrorException("SubRemover: unexpected error on {0}", ex, items[i].Path);
                     outcome = Outcome.Failed;
                 }
                 counts[outcome]++;
@@ -104,16 +145,29 @@ namespace Emby.Subremover.ScheduledTasks
                 if (outcome == Outcome.Changed || outcome == Outcome.WouldChange) changes++;
                 if (options.MaxItemsPerRun > 0 && changes >= options.MaxItemsPerRun)
                 {
-                    _log.Info("Subremover: reached the limit of {0} videos per run", options.MaxItemsPerRun);
+                    _log.Info("SubRemover: reached the limit of {0} videos per run", options.MaxItemsPerRun);
                     break;
                 }
             }
 
             CleanOldBackups(options, state);
 
+            state.LastRun = new RunSummary
+            {
+                FinishedUtc = DateTime.UtcNow,
+                DryRun = options.DryRun,
+                Changed = counts[Outcome.Changed],
+                WouldChange = counts[Outcome.WouldChange],
+                NothingToDo = counts[Outcome.NothingToDo],
+                AlreadyDone = counts[Outcome.AlreadyDone],
+                Failed = counts[Outcome.Failed],
+                LogFile = runLog.FileName
+            };
+            _store.Save(state);
+
             progress.Report(100);
-            _log.Info("Subremover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed",
-                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed]);
+            runLog.Summary("SubRemover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed. Details: {5}",
+                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed], runLog.FileName);
         }
 
         private static string Validate(PluginOptions o)
@@ -182,18 +236,18 @@ namespace Emby.Subremover.ScheduledTasks
             {
                 if (options.DryRun)
                 {
-                    _log.Info("Subremover [TEST MODE]: would delete old backup {0}", entry.BackupPath);
+                    _log.Info("SubRemover [TEST MODE]: would delete old backup {0}", entry.BackupPath);
                     continue;
                 }
                 try
                 {
                     if (File.Exists(entry.BackupPath)) File.Delete(entry.BackupPath);
                     state.Backups.Remove(entry);
-                    _log.Info("Subremover: deleted backup older than {0} days: {1}", options.BackupRetentionDays, entry.BackupPath);
+                    _log.Info("SubRemover: deleted backup older than {0} days: {1}", options.BackupRetentionDays, entry.BackupPath);
                 }
                 catch (Exception ex)
                 {
-                    _log.ErrorException("Subremover: could not delete old backup {0}", ex, entry.BackupPath);
+                    _log.ErrorException("SubRemover: could not delete old backup {0}", ex, entry.BackupPath);
                 }
             }
             if (!options.DryRun) _store.Save(state);

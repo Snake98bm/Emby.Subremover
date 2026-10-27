@@ -11,6 +11,7 @@ namespace Emby.Subremover.Core
         public bool KeepUndefined { get; set; } = true;
         public bool KeepForcedAnyLanguage { get; set; }
         public bool RemoveHearingImpaired { get; set; }
+        public bool RemoveCommentary { get; set; }
         public bool ExtractTextSubtitles { get; set; }
         public bool RemoveExtractedFromVideo { get; set; }
         public bool OcrPictureSubtitles { get; set; }
@@ -25,7 +26,7 @@ namespace Emby.Subremover.Core
         /// <summary>Changes whenever a setting that affects the plan changes, so already-checked videos get checked again.</summary>
         public string Signature() => string.Join("|",
             string.Join(",", KeepLanguages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase)),
-            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting);
+            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting);
     }
 
     public class ExtractJob
@@ -80,10 +81,17 @@ namespace Emby.Subremover.Core
         {
             var plan = new SubtitlePlan();
             var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var subtitles = probe.streams.Where(x => x.IsSubtitle).ToList();
 
-            foreach (var s in probe.streams.Where(x => x.IsSubtitle))
+            // Languages that keep a regular (not SDH, not forced-only) track. SDH is only removed where one of these
+            // stays, so a video whose only English track is SDH doesn't lose its English subtitles.
+            var regularLanguages = new HashSet<string>(
+                subtitles.Where(x => !x.IsHearingImpaired && !x.IsForced && KeptByLanguage(x, settings)).Select(x => x.Language),
+                StringComparer.OrdinalIgnoreCase);
+
+            foreach (var s in subtitles)
             {
-                if (!ShouldKeep(s, settings))
+                if (!ShouldKeep(s, settings, regularLanguages))
                 {
                     plan.Remove.Add(s);
                     continue;
@@ -122,9 +130,15 @@ namespace Emby.Subremover.Core
             return plan;
         }
 
-        private static bool ShouldKeep(ProbeStream s, PlannerSettings settings)
+        private static bool ShouldKeep(ProbeStream s, PlannerSettings settings, ISet<string> regularLanguages)
         {
-            if (settings.RemoveHearingImpaired && s.IsHearingImpaired) return false;
+            if (settings.RemoveHearingImpaired && s.IsHearingImpaired && regularLanguages.Contains(s.Language)) return false;
+            return KeptByLanguage(s, settings);
+        }
+
+        private static bool KeptByLanguage(ProbeStream s, PlannerSettings settings)
+        {
+            if (settings.RemoveCommentary && s.IsCommentary) return false;
             if (settings.KeepLanguages.Contains(s.Language)) return true;
             if (s.Language == "und" && settings.KeepUndefined) return true;
             if (s.IsForced && settings.KeepForcedAnyLanguage) return true;

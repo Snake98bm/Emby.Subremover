@@ -71,6 +71,66 @@ public class SubtitlePlannerTests
     }
 
     [Fact]
+    public void Sdh_stays_when_it_is_the_only_track_in_a_kept_language()
+    {
+        // Like Batman Begins in the test run: the only English track is SDH, the rest are other languages.
+        var settings = Keep("eng");
+        settings.RemoveHearingImpaired = true;
+        var probe = Movie(Sub(3, "eng", codec: "hdmv_pgs_subtitle", sdh: true), Sub(4, "fre", codec: "hdmv_pgs_subtitle"), Sub(5, "spa", codec: "hdmv_pgs_subtitle"));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 4, 5 }, Indexes(plan.Remove));
+    }
+
+    [Fact]
+    public void Forced_or_removed_commentary_tracks_dont_count_as_a_regular_track()
+    {
+        var settings = Keep("eng");
+        settings.RemoveHearingImpaired = true;
+        settings.RemoveCommentary = true;
+        var probe = Movie(Sub(2, "eng", forced: true), Sub(3, "eng", title: "Commentary"), Sub(4, "eng", sdh: true));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 2, 4 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 3 }, Indexes(plan.Remove));
+    }
+
+    [Fact]
+    public void Sdh_is_checked_per_language()
+    {
+        var settings = Keep("eng, spa");
+        settings.RemoveHearingImpaired = true;
+        var probe = Movie(Sub(2, "eng"), Sub(3, "eng", sdh: true), Sub(4, "spa", sdh: true), Sub(5, "fre", sdh: true));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 2, 4 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 3, 5 }, Indexes(plan.Remove));
+    }
+
+    [Fact]
+    public void Commentary_tracks_are_removed_only_when_asked()
+    {
+        var flagged = Sub(5, "eng");
+        flagged.disposition["comment"] = 1;
+        var probe = Movie(Sub(3, "eng"), Sub(4, "eng", title: "Commentary"), flagged, Sub(6, "eng", title: "Director's commentary"));
+
+        Assert.Empty(SubtitlePlanner.Plan(probe, Keep("eng"), Video).Remove);
+
+        var settings = Keep("eng");
+        settings.RemoveCommentary = true;
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 4, 5, 6 }, Indexes(plan.Remove));
+        Assert.Equal("#5 eng subrip commentary", flagged.Describe());
+        Assert.Equal("#4 eng subrip \"Commentary\"", plan.Remove[0].Describe());
+    }
+
+    [Fact]
     public void Non_subtitle_streams_are_never_touched()
     {
         var plan = SubtitlePlanner.Plan(Movie(Sub(2, "fre")), Keep("eng"), Video);
