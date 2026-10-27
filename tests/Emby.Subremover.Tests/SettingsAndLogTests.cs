@@ -78,6 +78,70 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
+    public void Log_viewer_lists_run_logs_newest_first_and_reads_them()
+    {
+        var older = Path.Combine(_dir, "subremover-20261027-090000.txt");
+        var newer = Path.Combine(_dir, "subremover-restore-20261027-100000.txt");
+        File.WriteAllText(older, "older run");
+        File.WriteAllText(newer, "newer run");
+        File.SetLastWriteTimeUtc(older, DateTime.UtcNow.AddHours(-1));
+        File.WriteAllText(Path.Combine(_dir, "embyserver.txt"), "not ours");
+
+        Assert.Equal(new[] { Path.GetFileName(newer), Path.GetFileName(older) }, RunLog.ListFiles(_dir));
+        Assert.Equal("older run", RunLog.ReadForDisplay(_dir, Path.GetFileName(older)));
+    }
+
+    [Theory]
+    [InlineData("embyserver.txt")]
+    [InlineData("../secret.txt")]
+    [InlineData(@"..\subremover-x.txt")]
+    [InlineData(null)]
+    public void Log_viewer_only_reads_run_logs(string requested)
+    {
+        var logs = Directory.CreateDirectory(Path.Combine(_dir, "logs")).FullName;
+        File.WriteAllText(Path.Combine(logs, "embyserver.txt"), "server log");
+        File.WriteAllText(Path.Combine(_dir, "secret.txt"), "secret");
+        File.WriteAllText(Path.Combine(_dir, "subremover-x.txt"), "outside the log folder");
+
+        var text = RunLog.ReadForDisplay(logs, requested);
+
+        Assert.StartsWith("No run log yet", text);
+    }
+
+    [Fact]
+    public void Long_logs_show_the_end()
+    {
+        var name = "subremover-20261027-110000.txt";
+        File.WriteAllText(Path.Combine(_dir, name), new string('a', 500) + "LAST LINE");
+
+        var text = RunLog.ReadForDisplay(_dir, name, maxChars: 100);
+
+        Assert.StartsWith("… (start of the log cut off", text);
+        Assert.EndsWith("LAST LINE", text);
+    }
+
+    [Fact]
+    public void Display_only_fields_are_cleared_before_saving()
+    {
+        var options = new PluginOptions
+        {
+            LogText = "big log",
+            SelectedLog = "subremover-1.txt",
+            LogChoices = { new Emby.Web.GenericEdit.Common.EditorSelectOption { Value = "x" } },
+            LanguageChoices = { new Emby.Web.GenericEdit.Common.EditorSelectOption { Value = "eng" } },
+            KeepLanguages = "eng,spa"
+        };
+
+        options.ClearDisplayOnlyFields();
+
+        Assert.Null(options.LogText);
+        Assert.Null(options.SelectedLog);
+        Assert.Empty(options.LogChoices);
+        Assert.Empty(options.LanguageChoices);
+        Assert.Equal("eng,spa", options.KeepLanguages);
+    }
+
+    [Fact]
     public void Only_the_newest_run_logs_are_kept()
     {
         for (var i = 0; i < 40; i++) File.WriteAllText(Path.Combine(_dir, $"subremover-20260101-0000{i:00}.txt"), "old");

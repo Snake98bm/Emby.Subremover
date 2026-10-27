@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -111,6 +112,35 @@ namespace Emby.Subremover
             {
                 _writer.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {severity,-5} {text}");
             }
+        }
+
+        /// <summary>Run log file names, newest first.</summary>
+        public static List<string> ListFiles(string directory)
+        {
+            if (!Directory.Exists(directory)) return new List<string>();
+            return new DirectoryInfo(directory).GetFiles("subremover-*.txt")
+                .OrderByDescending(f => f.LastWriteTimeUtc)
+                .Select(f => f.Name)
+                .ToList();
+        }
+
+        /// <summary>
+        /// Reads a run log for display. Only names that are actually run logs in <paramref name="directory"/> are read,
+        /// because the name comes from the browser.
+        /// </summary>
+        public static string ReadForDisplay(string directory, string fileName, int maxChars = 200_000)
+        {
+            if (string.IsNullOrEmpty(fileName) || !ListFiles(directory).Contains(fileName)) return "No run log yet. Click Run now to create one.";
+
+            string text;
+            using (var stream = new FileStream(Path.Combine(directory, fileName), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream, Encoding.UTF8))
+            {
+                text = reader.ReadToEnd();
+            }
+            return text.Length <= maxChars
+                ? text
+                : "… (start of the log cut off, open the file under Settings → Logs for all of it)" + Environment.NewLine + text.Substring(text.Length - maxChars);
         }
 
         internal static void DeleteOldFiles(string directory, string prefix, int keep)

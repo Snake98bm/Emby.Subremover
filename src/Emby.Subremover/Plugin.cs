@@ -25,6 +25,7 @@ namespace Emby.Subremover
         private readonly ILibraryManager _libraryManager;
         private readonly OptionsStore _store;
         private readonly StateStore _state;
+        private readonly string _logDirectory;
         private readonly List<IPluginUIPageController> _pages;
 
         public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager)
@@ -36,6 +37,7 @@ namespace Emby.Subremover
                 Name,
                 applicationHost.Resolve<IJsonSerializer>(),
                 applicationHost.Resolve<ILogManager>().GetLogger(Name));
+            _logDirectory = applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath;
             _state = new StateStore(applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, applicationHost.Resolve<IJsonSerializer>());
             _pages = new List<IPluginUIPageController> { new SettingsPageController(this, Name, () => Options.ShowInSidebar) };
             Instance = this;
@@ -108,7 +110,25 @@ namespace Emby.Subremover
                 .ToList();
             options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
             options.RunStatus = CurrentStatus();
+            options.SelectedLog = null;
+            ShowLog(options);
             return options;
+        }
+
+        /// <summary>Fills the log list and shows the selected run log, or the newest when none is selected.</summary>
+        internal void ShowLog(PluginOptions options)
+        {
+            try
+            {
+                var files = RunLog.ListFiles(_logDirectory);
+                options.LogChoices = files.Select(f => new EditorSelectOption { Value = f, Name = f, IsEnabled = true }).ToList();
+                if (!files.Contains(options.SelectedLog)) options.SelectedLog = files.FirstOrDefault();
+                options.LogText = RunLog.ReadForDisplay(_logDirectory, options.SelectedLog);
+            }
+            catch (Exception ex)
+            {
+                options.LogText = "Couldn't read the run log: " + ex.Message;
+            }
         }
 
         // Codes saved earlier that aren't in the standard list stay selectable, so saving never drops them.

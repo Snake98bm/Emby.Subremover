@@ -128,5 +128,32 @@ namespace Emby.Subremover
         [Description("Forgets which files were already processed. Switches itself back off after the run.")]
         [IsAdvanced]
         public bool ReprocessAll { get; set; }
+
+        [DisplayName("")]
+        public CaptionItem LogsCaption { get; set; } = new CaptionItem("Run logs");
+
+        [DisplayName("Run log")]
+        [Description("Shows the last run. Pick an older run to see its log. The newest 30 are kept.")]
+        [SelectItemsSource(nameof(LogChoices))]
+        [AutoPostBack(SettingsPageView.ShowLogCommand, nameof(SelectedLog))]
+        public string SelectedLog { get; set; }
+
+        [Browsable(false)]
+        public List<EditorSelectOption> LogChoices { get; set; } = new List<EditorSelectOption>();
+
+        [DisplayName("")]
+        [Description("Read only: anything typed here is not saved.")]
+        [EditMultiline(20)]
+        public string LogText { get; set; }
+
+        /// <summary>Drops the lists and log text that are only filled in for display, so they never go into the settings file.</summary>
+        internal void ClearDisplayOnlyFields()
+        {
+            LibraryChoices = new List<EditorSelectOption>();
+            LanguageChoices = new List<EditorSelectOption>();
+            LogChoices = new List<EditorSelectOption>();
+            SelectedLog = null;
+            LogText = null;
+        }
     }
 }

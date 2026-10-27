@@ -45,6 +45,7 @@ namespace Emby.Subremover
     {
         public const string QuickSetupCommand = "SubremoverQuickSetup";
         public const string RunNowCommand = "SubremoverRunNow";
+        public const string ShowLogCommand = "SubremoverShowLog";
 
         private readonly Plugin _plugin;
 
@@ -92,6 +93,10 @@ namespace Emby.Subremover
                     UIViewInfoChanged?.Invoke(this, new GenericEventArgs<IPluginUIView>(this));
                     return Task.FromResult<IPluginUIView>(this);
 
+                case ShowLogCommand:
+                    _plugin.ShowLog(Options);
+                    return Task.FromResult<IPluginUIView>(this);
+
                 default:
                     return Task.FromResult<IPluginUIView>(null);
             }
@@ -112,6 +117,7 @@ namespace Emby.Subremover
         private void Save()
         {
             Options.ValidateOrThrow();
+            Options.ClearDisplayOnlyFields();
             _plugin.Save(Options);
             Options = _plugin.PrepareForDisplay(Options);
             UIViewInfoChanged?.Invoke(this, new GenericEventArgs<IPluginUIView>(this));

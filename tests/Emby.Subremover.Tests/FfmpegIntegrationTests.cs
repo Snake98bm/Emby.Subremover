@@ -159,6 +159,27 @@ public sealed class FfmpegIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Reads_accented_track_titles_correctly()
+    {
+        RequireFfmpeg();
+        var srt = Path.Combine(_dir, "es.srt");
+        File.WriteAllText(srt, Srt("Hola"));
+        var video = Path.Combine(_dir, "Titles.mkv");
+        var make = await _runner.RunFfmpeg(new List<string>
+        {
+            "-hide_banner", "-nostdin", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=black:s=160x120:r=10:d=2", "-i", srt,
+            "-map", "0:v", "-map", "1:s", "-c:v", "mpeg4", "-c:s", "srt",
+            "-metadata:s:s:0", "language=spa", "-metadata:s:s:0", "title=Español (Latinoamérica)", video
+        }, TestContext.Current.CancellationToken);
+        Assert.True(make.Success, make.StdErr);
+
+        var sub = (await Probe(video)).streams.Single(s => s.IsSubtitle);
+
+        Assert.Equal("Español (Latinoamérica)", sub.Title);
+    }
+
+    [Fact]
     public async Task Handles_paths_with_spaces_quotes_and_unicode()
     {
         RequireFfmpeg();
