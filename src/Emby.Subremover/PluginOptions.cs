@@ -29,9 +29,18 @@ namespace Emby.Subremover
         [Browsable(false)]
         public List<EditorSelectOption> LibraryChoices { get; set; } = new List<EditorSelectOption>();
 
+        [DisplayName("Quick setup: keep English and subtitles with no language")]
+        [Description("Tick this and click Save to select only English below and turn on 'Keep subtitles with no language set'. It unticks itself afterwards.")]
+        public bool ApplyEnglishPreset { get; set; }
+
         [DisplayName("Subtitle languages to keep")]
-        [Description("Comma-separated 3-letter language codes as Emby shows them, e.g. eng,spa. Every other embedded subtitle track is removed.")]
+        [Description("Tick every language you want to keep. Embedded subtitles in any language that isn't ticked are removed. Matches all spellings, e.g. ger, deu and de.")]
+        [EditMultilSelect]
+        [SelectItemsSource(nameof(LanguageChoices))]
         public string KeepLanguages { get; set; } = "eng";
+
+        [Browsable(false)]
+        public List<EditorSelectOption> LanguageChoices { get; set; } = new List<EditorSelectOption>();
 
         [DisplayName("Keep subtitles with no language set")]
         [Description("Tracks tagged 'und' (undefined) are often English. Safer to keep them.")]

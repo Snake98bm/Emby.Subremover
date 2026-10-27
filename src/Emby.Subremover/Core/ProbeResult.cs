@@ -54,14 +54,7 @@ namespace Emby.Subremover.Core
             return false;
         }
 
-        public string Language
-        {
-            get
-            {
-                var lang = Tag("language");
-                return string.IsNullOrWhiteSpace(lang) ? "und" : lang.Trim().ToLowerInvariant();
-            }
-        }
+        public string Language => Languages.Normalize(Tag("language"));
 
         public string Title => Tag("title") ?? string.Empty;
 

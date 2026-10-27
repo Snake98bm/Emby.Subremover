@@ -17,7 +17,7 @@ namespace Emby.Subremover.Core
         public static ISet<string> ParseLanguages(string csv) =>
             new HashSet<string>(
                 (csv ?? string.Empty).Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
-                    .Select(l => l.Trim().ToLowerInvariant()),
+                    .Select(Languages.Normalize),
                 StringComparer.OrdinalIgnoreCase);
     }
 

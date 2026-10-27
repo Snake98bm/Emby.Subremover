@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using Emby.Subremover.Core;
 using Emby.Web.GenericEdit.Common;
 using MediaBrowser.Common;
 using MediaBrowser.Controller.Library;
@@ -35,7 +37,30 @@ namespace Emby.Subremover
                 .Where(f => f.CollectionType != "music" && f.CollectionType != "books" && f.CollectionType != "photos")
                 .Select(f => new EditorSelectOption { Value = f.ItemId, Name = f.Name, IsEnabled = true })
                 .ToList();
+
+            options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
             return base.OnBeforeShowUI(options);
+        }
+
+        protected override bool OnOptionsSaving(PluginOptions options)
+        {
+            if (options.ApplyEnglishPreset)
+            {
+                options.KeepLanguages = "eng";
+                options.KeepUndefined = true;
+                options.ApplyEnglishPreset = false;
+            }
+            return base.OnOptionsSaving(options);
+        }
+
+        // Codes saved earlier that aren't in the standard list stay selectable, so saving never drops them.
+        internal static List<EditorSelectOption> LanguageChoicesFor(string selected)
+        {
+            var standard = Languages.All.Select(l => new EditorSelectOption { Value = l.Code, Name = $"{l.Name} ({l.Code})", IsEnabled = true });
+            var extra = PlannerSettings.ParseLanguages(selected)
+                .Where(code => Languages.All.All(l => l.Code != code))
+                .Select(code => new EditorSelectOption { Value = code, Name = code, IsEnabled = true });
+            return standard.Concat(extra).ToList();
         }
     }
 }
