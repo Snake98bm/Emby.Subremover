@@ -1,0 +1,19 @@
+# Build output
+bin/
+obj/
+artifacts/
+TestResults/
+
+# Emby's ffmpeg copied in for local tests - never commit binaries
+tools/ffmpeg/
+
+# Editors
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# OS
+Thumbs.db
+.DS_Store
