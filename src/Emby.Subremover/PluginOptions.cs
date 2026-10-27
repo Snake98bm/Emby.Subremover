@@ -72,7 +72,7 @@ namespace Emby.Subremover
         public bool KeepForcedAnyLanguage { get; set; }
 
         [DisplayName("Remove SDH / hearing-impaired subtitles")]
-        [Description("Removes them when a regular subtitle track in the same language stays. If SDH is the only track in a language you keep, it stays.")]
+        [Description("Includes closed captions (titles with 'CC'). Removes them when a regular subtitle track in the same language stays. If SDH is the only track in a language you keep, it stays.")]
         public bool RemoveHearingImpaired { get; set; }
 
         [DisplayName("Remove commentary subtitles")]
@@ -88,7 +88,7 @@ namespace Emby.Subremover
         public bool RemoveExtractedFromVideo { get; set; }
 
         [DisplayName("Experimental: convert picture subtitles to text (OCR)")]
-        [Description("Reads kept picture subtitles (PGS/DVD) with OCR and saves them as text next to the video, e.g. 'Movie.pgs.eng.srt'. The picture track stays in the video. Downloads the language data (about 4 MB per language) the first time. OCR can misread words.")]
+        [Description("Reads kept picture subtitles (PGS/DVD) with OCR and saves them as text next to the video, e.g. 'Movie.pgs.eng.srt'. The picture track stays in the video. Commentary tracks are skipped. Downloads the language data (about 4 MB per language) the first time. OCR can misread words.")]
         public bool OcrPictureSubtitles { get; set; }
 
         [DisplayName("If the OCR subtitle file already exists")]
@@ -118,7 +118,7 @@ namespace Emby.Subremover
 
         [DisplayName("Only process paths containing")]
         [Description("Optional. Only videos whose full path contains this text are processed (or restored); capitals don't matter. " +
-                     "Example: 'Batman Begins (2005)' matches only that movie, '\\Movies\\' matches only your Movies folder. Leave empty for everything.")]
+                     "Example: 'My Movie (2020)' matches only that movie, '\\Movies\\' matches only your Movies folder. Leave empty for everything.")]
         public string OnlyPathContains { get; set; } = string.Empty;
 
         [DisplayName("Show in the server sidebar menu")]

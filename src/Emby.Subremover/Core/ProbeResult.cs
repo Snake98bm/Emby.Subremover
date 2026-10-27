@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Emby.Subremover.Core
 {
@@ -84,7 +85,12 @@ namespace Emby.Subremover.Core
         public bool IsHearingImpaired =>
             Disposition("hearing_impaired")
             || Title.IndexOf("SDH", StringComparison.OrdinalIgnoreCase) >= 0
-            || Title.IndexOf("hearing impaired", StringComparison.OrdinalIgnoreCase) >= 0;
+            || Title.IndexOf("hearing impaired", StringComparison.OrdinalIgnoreCase) >= 0
+            || Title.IndexOf("deaf", StringComparison.OrdinalIgnoreCase) >= 0
+            || ClosedCaptions.IsMatch(Title);
+
+        // "English (CC)", "English [CC]": closed captions are SDH under another name. Capitals and a separate word only.
+        private static readonly Regex ClosedCaptions = new Regex(@"\bCC\b", RegexOptions.CultureInvariant);
 
         public bool IsCommentary =>
             Disposition("comment") || Title.IndexOf("commentary", StringComparison.OrdinalIgnoreCase) >= 0;

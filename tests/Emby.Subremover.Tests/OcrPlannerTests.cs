@@ -6,7 +6,7 @@ namespace Emby.Subremover.Tests;
 
 public class OcrPlannerTests
 {
-    private const string Video = @"D:\Movies\Heat (1995)\Heat (1995).mkv";
+    private const string Video = @"D:\Movies\My Movie (2020)\My Movie (2020).mkv";
 
     private static PlannerSettings Ocr(string languages) => new()
     {
@@ -24,7 +24,7 @@ public class OcrPlannerTests
             Sub(3, "eng", codec: "dvd_subtitle", forced: true),
             Sub(4, "eng", codec: "subrip")), Ocr("eng"), Video);
 
-        Assert.Equal(new[] { "Heat (1995).pgs.eng.srt", "Heat (1995).dvd.eng.forced.srt" }, plan.Ocr.Select(Name));
+        Assert.Equal(new[] { "My Movie (2020).pgs.eng.srt", "My Movie (2020).dvd.eng.forced.srt" }, plan.Ocr.Select(Name));
         Assert.All(plan.Ocr, j => Assert.Equal("eng", j.TesseractLanguage));
         Assert.Equal(3, plan.Keep.Count);
         Assert.Empty(plan.Remove);
@@ -105,8 +105,8 @@ public class OcrPlannerTests
         Assert.Contains("[TEST MODE - no changes]", text);
         Assert.Contains("keep:    #2 eng hdmv_pgs_subtitle, #3 eng subrip", text);
         Assert.Contains("remove:  #4 fre subrip \"Weird {0} title\"", text);
-        Assert.Contains("extract: #3 eng subrip -> Heat (1995).eng.srt", text.Replace('\\', '/').Replace("D:/Movies/Heat (1995)/", ""));
-        Assert.Contains("ocr:     #2 eng hdmv_pgs_subtitle -> Heat (1995).pgs.eng.srt", text.Replace('\\', '/').Replace("D:/Movies/Heat (1995)/", ""));
+        Assert.Contains("extract: #3 eng subrip -> My Movie (2020).eng.srt", text.Replace('\\', '/').Replace("D:/Movies/My Movie (2020)/", ""));
+        Assert.Contains("ocr:     #2 eng hdmv_pgs_subtitle -> My Movie (2020).pgs.eng.srt", text.Replace('\\', '/').Replace("D:/Movies/My Movie (2020)/", ""));
     }
 
     [Fact]
