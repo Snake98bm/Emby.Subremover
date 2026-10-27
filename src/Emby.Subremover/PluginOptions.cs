@@ -72,7 +72,7 @@ namespace Emby.Subremover
         public bool KeepForcedAnyLanguage { get; set; }
 
         [DisplayName("Remove SDH / hearing-impaired subtitles")]
-        [Description("Removes them even when they are in a language you keep.")]
+        [Description("Removes them when a regular subtitle track in the same language stays. If SDH is the only track in a language you keep, it stays.")]
         public bool RemoveHearingImpaired { get; set; }
 
         [DisplayName("Remove commentary subtitles")]
