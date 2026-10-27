@@ -89,7 +89,7 @@ namespace Emby.Subremover.Core
             }
 
             // Backup is in another folder (maybe another drive): copy next to the original first so a failed copy never loses the current file.
-            var temp = original + ".subremover-restore";
+            var temp = original + Leftovers.RestoreSuffix;
             File.Copy(entry.BackupPath, temp, true);
             if (File.Exists(original)) File.Delete(original);
             File.Move(temp, original);

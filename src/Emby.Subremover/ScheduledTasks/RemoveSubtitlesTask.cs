@@ -52,6 +52,16 @@ namespace Emby.Subremover.ScheduledTasks
         {
             using (var runLog = new RunLog(_logDirectory, "subremover", _embyLog))
             {
+                if (!TaskGate.TryEnter())
+                {
+                    const string busy = "another Subremover task (restore) is running - try again when it has finished";
+                    runLog.Summary("Subremover: {0}", busy);
+                    var state = _store.Load();
+                    state.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, Problem = busy, LogFile = runLog.FileName };
+                    _store.Save(state);
+                    return;
+                }
+
                 _log = runLog;
                 try
                 {
@@ -60,6 +70,7 @@ namespace Emby.Subremover.ScheduledTasks
                 finally
                 {
                     _log = _embyLog;
+                    TaskGate.Exit();
                 }
             }
         }
@@ -82,23 +93,28 @@ namespace Emby.Subremover.ScheduledTasks
             }
 
             var state = _store.Load();
+            if (state.InProgress != null)
+            {
+                foreach (var file in Leftovers.Clean(state.InProgress)) _log.Info("Subremover: deleted leftover {0} from an interrupted run", file);
+                state.InProgress = null;
+                _store.Save(state);
+            }
+
             if (options.ReprocessAll && !options.DryRun)
             {
-                _log.Info("Subremover: 'Re-check every video' is on - clearing the processed list");
-                state.Processed.Clear();
+                _log.Info("Subremover: 'Re-check every video' is on - clearing the processed and restored lists");
+                state.ForgetEverything();
                 _store.Save(state);
                 options.ReprocessAll = false;
                 Plugin.Instance.Save(options);
             }
 
             var signature = MediaProcessor.SettingsFrom(options).Signature();
-            if (!options.DryRun && state.SettingsSignature != signature)
+            if (!options.DryRun && state.ApplySettingsSignature(signature))
             {
-                if (state.Processed.Count > 0) _log.Info("Subremover: settings changed since the last run - checking every video again");
-                state.Processed.Clear();
-                state.SettingsSignature = signature;
-                _store.Save(state);
+                _log.Info("Subremover: settings changed since the last run - checking every video again (restored videos stay untouched)");
             }
+            if (!options.DryRun) _store.Save(state);
 
             var items = FindVideos(options);
             _log.Info("Subremover: {0} video files to check", items.Count);

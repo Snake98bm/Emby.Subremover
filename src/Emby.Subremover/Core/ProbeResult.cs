@@ -16,12 +16,33 @@ namespace Emby.Subremover.Core
 
         public double? DurationSeconds =>
             double.TryParse(format?.duration, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : (double?)null;
+
+        /// <summary>
+        /// Matroska NUMBER_OF_FRAMES statistics are written by mkvmerge/MakeMKV. ffmpeg copies them unchanged when it
+        /// rewrites or trims a file, so they can be stale in files last written by ffmpeg ("Lavf" encoder).
+        /// </summary>
+        public bool FrameCountsAreCurrent
+        {
+            get
+            {
+                string encoder = null;
+                if (format?.tags != null)
+                {
+                    foreach (var kv in format.tags)
+                    {
+                        if (string.Equals(kv.Key, "encoder", StringComparison.OrdinalIgnoreCase)) encoder = kv.Value;
+                    }
+                }
+                return encoder == null || encoder.IndexOf("Lavf", StringComparison.OrdinalIgnoreCase) < 0;
+            }
+        }
     }
 
     public class ProbeFormat
     {
         public string duration { get; set; }
         public string format_name { get; set; }
+        public Dictionary<string, string> tags { get; set; }
     }
 
     public class ProbeStream

@@ -38,7 +38,7 @@ namespace Emby.Subremover
         public Task Initialize(CancellationToken token) => Task.CompletedTask;
 
         public Task<IPluginUIView> CreateDefaultPageView() =>
-            Task.FromResult<IPluginUIView>(new SettingsPageView(_plugin, _plugin.PrepareForDisplay(_plugin.Options)));
+            Task.FromResult<IPluginUIView>(new SettingsPageView(_plugin, _plugin.PrepareForDisplay(_plugin.OptionsForEditing())));
     }
 
     internal sealed class SettingsPageView : IPluginPageView
@@ -117,7 +117,6 @@ namespace Emby.Subremover
         private void Save()
         {
             Options.ValidateOrThrow();
-            Options.ClearDisplayOnlyFields();
             _plugin.Save(Options);
             Options = _plugin.PrepareForDisplay(Options);
             UIViewInfoChanged?.Invoke(this, new GenericEventArgs<IPluginUIView>(this));

@@ -4,6 +4,8 @@ namespace Emby.Subremover.Core
 {
     public static class RemuxVerifier
     {
+        public const double DurationToleranceSeconds = 5;
+
         /// <returns>null when the new file looks correct, otherwise the reason it was rejected.</returns>
         public static string Verify(ProbeResult before, ProbeResult after, int removedSubtitles, long beforeBytes, long afterBytes)
         {
@@ -23,8 +25,9 @@ namespace Emby.Subremover.Core
             var d2 = after.DurationSeconds;
             if (d1.HasValue && d2.HasValue)
             {
-                var tolerance = Math.Max(2.0, d1.Value * 0.01);
-                if (Math.Abs(d1.Value - d2.Value) > tolerance)
+                // A stream copy keeps the length; a few seconds covers rounding. A percentage would let a
+                // 2-hour movie lose over a minute at the end without being noticed.
+                if (Math.Abs(d1.Value - d2.Value) > DurationToleranceSeconds)
                     return $"duration changed ({d1:F1}s -> {d2:F1}s)";
             }
 

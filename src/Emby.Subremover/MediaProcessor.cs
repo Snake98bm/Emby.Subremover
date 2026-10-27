@@ -24,7 +24,7 @@ namespace Emby.Subremover
 
     public class MediaProcessor
     {
-        private const string TempSuffix = ".subremover-tmp";
+        private const string TempSuffix = Leftovers.TempSuffix;
 
         private readonly FfmpegRunner _runner;
         private readonly ILibraryMonitor _libraryMonitor;
@@ -62,6 +62,12 @@ namespace Emby.Subremover
         public async Task<Outcome> Process(BaseItem item, PluginOptions options, SubremoverState state, StateStore store, CancellationToken ct)
         {
             var path = item.Path;
+            if (state.IsRestored(path))
+            {
+                _log.Debug("Subremover: {0} was restored from its backup, leaving it alone", path);
+                return Outcome.AlreadyDone;
+            }
+
             var stamp = FileStamp.Of(path);
             if (state.Processed.TryGetValue(path, out var done) && done.Matches(stamp)) return Outcome.AlreadyDone;
 
@@ -83,9 +89,29 @@ namespace Emby.Subremover
             LogPlan(path, plan, options.DryRun);
             if (options.DryRun) return Outcome.WouldChange;
 
+            state.InProgress = path;
+            store.Save(state);
+            try
+            {
+                return await Apply(item, path, before, plan, options, state, store, ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                // Catches temp files from any step that was cancelled or failed part-way.
+                foreach (var file in Leftovers.Clean(path)) _log.Debug("Subremover: deleted leftover {0}", file);
+                state.InProgress = null;
+                store.Save(state);
+            }
+        }
+
+        private async Task<Outcome> Apply(BaseItem item, string path, ProbeResult before, SubtitlePlan plan, PluginOptions options,
+            SubremoverState state, StateStore store, CancellationToken ct)
+        {
             foreach (var job in plan.Extract)
             {
-                if (!await Extract(path, job, ct).ConfigureAwait(false)) return Outcome.Failed;
+                var extracted = await Extract(path, job, before.FrameCountsAreCurrent, ct).ConfigureAwait(false);
+                if (extracted == ExtractOutcome.Failed) return Outcome.Failed;
+                if (extracted == ExtractOutcome.KeepTrackInVideo && plan.Remove.Remove(job.Stream)) plan.Keep.Add(job.Stream);
             }
 
             // OCR before the remux: the stream indexes in the plan belong to the original file.
@@ -159,25 +185,46 @@ namespace Emby.Subremover
             }
         }
 
-        private async Task<bool> Extract(string videoPath, ExtractJob job, CancellationToken ct)
+        private enum ExtractOutcome
         {
+            Done,
+            Failed,
+            KeepTrackInVideo
+        }
+
+        private async Task<ExtractOutcome> Extract(string videoPath, ExtractJob job, bool compareCount, CancellationToken ct)
+        {
+            var isAss = !job.ConvertToSrt;
             if (File.Exists(job.OutputPath))
             {
-                _log.Info("Subremover: {0} already exists, not overwriting", job.OutputPath);
-                return true;
+                // Someone else's file, or one cut short earlier: it never replaces the embedded track unless it's complete.
+                var existingProblem = OutputChecks.CheckSubtitleFile(job.OutputPath, job.Stream, isAss, compareCount);
+                if (existingProblem == null)
+                {
+                    _log.Info("Subremover: {0} already exists and looks complete, not overwriting", job.OutputPath);
+                    return ExtractOutcome.Done;
+                }
+                _log.Warn("Subremover: existing {0} looks incomplete ({1}). Leaving that file alone and keeping {2} in the video.",
+                    job.OutputPath, existingProblem, job.Stream.Describe());
+                return ExtractOutcome.KeepTrackInVideo;
             }
 
-            var result = await _runner.RunFfmpeg(FfmpegArgs.Extract(videoPath, job.Stream.index, job.OutputPath, job.ConvertToSrt), ct).ConfigureAwait(false);
-            if (result.Success && File.Exists(job.OutputPath) && new FileInfo(job.OutputPath).Length > 0)
+            var temp = job.OutputPath + TempSuffix;
+            var result = await _runner.RunFfmpeg(FfmpegArgs.Extract(videoPath, job.Stream.index, temp, job.ConvertToSrt), ct).ConfigureAwait(false);
+            var problem = !result.Success
+                ? $"ffmpeg exit {result.ExitCode}: {result.StdErr}"
+                : OutputChecks.TruncationMessage(result.StdErr) ?? OutputChecks.CheckSubtitleFile(temp, job.Stream, isAss, compareCount);
+
+            if (problem == null)
             {
+                File.Move(temp, job.OutputPath);
                 _log.Info("Subremover: extracted {0} -> {1}", job.Stream.Describe(), job.OutputPath);
-                return true;
+                return ExtractOutcome.Done;
             }
 
-            _log.Error("Subremover: extracting {0} from {1} failed (exit {2}): {3}. Video left unchanged.",
-                job.Stream.Describe(), videoPath, result.ExitCode, result.StdErr);
-            TryDelete(job.OutputPath);
-            return false;
+            _log.Error("Subremover: extracting {0} from {1} failed ({2}). Video left unchanged.", job.Stream.Describe(), videoPath, problem);
+            TryDelete(temp);
+            return ExtractOutcome.Failed;
         }
 
         private async Task<bool> RemuxAndSwap(string path, ProbeResult before, SubtitlePlan plan, PluginOptions options, SubremoverState state, CancellationToken ct)
@@ -190,14 +237,16 @@ namespace Emby.Subremover
             }
 
             var temp = path + TempSuffix;
+            TryDelete(temp);
             var beforeBytes = new FileInfo(path).Length;
             _libraryMonitor.ReportFileSystemChangeBeginning(path);
             try
             {
                 var result = await _runner.RunFfmpeg(FfmpegArgs.Remux(path, temp, muxer, plan.Remove.Select(s => s.index)), ct).ConfigureAwait(false);
-                if (!result.Success)
+                var failure = !result.Success ? $"exit {result.ExitCode}: {result.StdErr}" : OutputChecks.TruncationMessage(result.StdErr);
+                if (failure != null)
                 {
-                    _log.Error("Subremover: ffmpeg failed for {0} (exit {1}): {2}. Original left unchanged.", path, result.ExitCode, result.StdErr);
+                    _log.Error("Subremover: ffmpeg failed for {0} ({1}). Original left unchanged.", path, failure);
                     TryDelete(temp);
                     return false;
                 }

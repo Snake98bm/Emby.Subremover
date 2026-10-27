@@ -46,10 +46,11 @@ namespace Emby.Subremover.Core
             return args;
         }
 
+        // The format is given explicitly because the output is written to a temporary name first.
         public static IList<string> Extract(string input, int streamIndex, string output, bool convertToSrt) => new List<string>
         {
             "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", input,
-            "-map", "0:" + streamIndex, "-c:s", convertToSrt ? "srt" : "copy", output
+            "-map", "0:" + streamIndex, "-c:s", convertToSrt ? "srt" : "copy", "-f", convertToSrt ? "srt" : "ass", output
         };
 
         // graphicsub2text exists only in Emby's ffmpeg build. The tessdata path is relative to the process working

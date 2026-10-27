@@ -41,6 +41,12 @@ namespace Emby.Subremover.ScheduledTasks
         {
             using (var runLog = new RunLog(_logDirectory, "subremover-restore", _embyLog))
             {
+                if (!TaskGate.TryEnter())
+                {
+                    runLog.Summary("Subremover: the remove task is running - try the restore again when it has finished");
+                    return Task.CompletedTask;
+                }
+
                 _log = runLog;
                 try
                 {
@@ -49,6 +55,7 @@ namespace Emby.Subremover.ScheduledTasks
                 finally
                 {
                     _log = _embyLog;
+                    TaskGate.Exit();
                 }
             }
             return Task.CompletedTask;
@@ -59,6 +66,13 @@ namespace Emby.Subremover.ScheduledTasks
             var options = Plugin.Instance.Options;
             var filter = options.OnlyPathContains?.Trim();
             var state = _store.Load();
+            if (state.InProgress != null)
+            {
+                foreach (var file in Leftovers.Clean(state.InProgress)) _log.Info("Subremover: deleted leftover {0} from an interrupted run", file);
+                state.InProgress = null;
+                _store.Save(state);
+            }
+
             var entries = state.Backups
                 .Where(b => string.IsNullOrEmpty(filter) || b.OriginalPath.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                 .ToList();
@@ -79,12 +93,14 @@ namespace Emby.Subremover.ScheduledTasks
                 }
 
                 _libraryMonitor.ReportFileSystemChangeBeginning(entry.OriginalPath);
+                state.InProgress = entry.OriginalPath;
+                _store.Save(state);
                 try
                 {
                     BackupManager.Restore(entry);
                     state.Backups.Remove(entry);
-                    // Remember the restored file so the next run doesn't immediately strip it again.
-                    state.Processed[entry.OriginalPath] = FileStamp.Of(entry.OriginalPath);
+                    // Restored on purpose: later runs leave it alone, even after settings change.
+                    state.MarkRestored(entry.OriginalPath);
                     restored++;
                     _log.Info("Subremover: restored {0}", entry.OriginalPath);
                 }
@@ -94,6 +110,7 @@ namespace Emby.Subremover.ScheduledTasks
                 }
                 finally
                 {
+                    state.InProgress = null;
                     _libraryMonitor.ReportFileSystemChangeComplete(entry.OriginalPath, true);
                 }
                 _store.Save(state);

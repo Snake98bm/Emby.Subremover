@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
 
@@ -9,6 +10,10 @@ namespace Emby.Subremover
     /// Reads and writes the settings in the same "&lt;plugin name&gt;.json" file Emby's built-in settings page used,
     /// so settings saved by earlier versions carry over.
     /// </summary>
+    /// <remarks>
+    /// The tasks share one cached copy; the settings page always gets its own copy, because it fills in
+    /// display-only data (lists, log text) that must never reach the settings file.
+    /// </remarks>
     public class OptionsStore
     {
         private readonly IJsonSerializer _json;
@@ -39,6 +44,7 @@ namespace Emby.Subremover
                         {
                             _options = (PluginOptions)new PluginOptions().DeserializeFromJsonStream(stream, _json);
                         }
+                        _options.ClearDisplayOnlyFields();
                     }
                 }
                 catch (Exception ex)
@@ -49,16 +55,34 @@ namespace Emby.Subremover
             }
         }
 
+        public PluginOptions GetCopy()
+        {
+            lock (_lock)
+            {
+                return Clone(Get());
+            }
+        }
+
         public void Save(PluginOptions options)
         {
             lock (_lock)
             {
+                var clean = Clone(options);
+                clean.ClearDisplayOnlyFields();
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 using (var stream = new FileStream(FilePath, FileMode.Create, FileAccess.Write))
                 {
-                    _json.SerializeToStream(options, stream, new JsonSerializerOptions { Indent = true });
+                    _json.SerializeToStream(clean, stream, new JsonSerializerOptions { Indent = true });
                 }
-                _options = options;
+                _options = clean;
+            }
+        }
+
+        private PluginOptions Clone(PluginOptions options)
+        {
+            using (var stream = new MemoryStream(Encoding.UTF8.GetBytes(_json.SerializeToString(options))))
+            {
+                return (PluginOptions)new PluginOptions().DeserializeFromJsonStream(stream, _json);
             }
         }
     }

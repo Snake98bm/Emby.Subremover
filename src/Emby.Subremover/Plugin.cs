@@ -59,6 +59,8 @@ namespace Emby.Subremover
 
         public PluginOptions Options => _store.Get();
 
+        internal PluginOptions OptionsForEditing() => _store.GetCopy();
+
         public void Save(PluginOptions options) => _store.Save(options);
 
         public override PluginInfo GetPluginInfo()

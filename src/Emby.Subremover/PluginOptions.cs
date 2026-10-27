@@ -125,7 +125,7 @@ namespace Emby.Subremover
         public bool ShowInSidebar { get; set; } = true;
 
         [DisplayName("Re-check every video on next run")]
-        [Description("Forgets which files were already processed. Switches itself back off after the run.")]
+        [Description("Forgets which files were already processed, including videos you restored from backups. Switches itself back off after the run.")]
         [IsAdvanced]
         public bool ReprocessAll { get; set; }
 

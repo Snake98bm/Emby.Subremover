@@ -159,6 +159,44 @@ public sealed class FfmpegIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task A_video_cut_off_mid_read_is_caught_even_though_ffmpeg_reports_success()
+    {
+        RequireFfmpeg();
+        var ct = TestContext.Current.CancellationToken;
+        var srt = Path.Combine(_dir, "many.srt");
+        File.WriteAllText(srt, string.Concat(Enumerable.Range(0, 20).Select(i =>
+            $"{i + 1}\n00:00:{i:00},100 --> 00:00:{i:00},900\nLine {i + 1}\n\n")));
+        var full = Path.Combine(_dir, "Full.mkv");
+        var make = await _runner.RunFfmpeg(new List<string>
+        {
+            "-hide_banner", "-nostdin", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc=duration=21:size=320x240:rate=10", "-i", srt,
+            "-map", "0:v", "-map", "1:s", "-c:v", "mpeg4", "-q:v", "3", "-c:s", "srt",
+            "-metadata:s:s:0", "language=eng", full
+        }, ct);
+        Assert.True(make.Success, make.StdErr);
+
+        // Same as a network drop: the reader only gets the first half of the file.
+        var cut = Path.Combine(_dir, "Cut.mkv");
+        var bytes = File.ReadAllBytes(full);
+        File.WriteAllBytes(cut, bytes.Take(bytes.Length / 2).ToArray());
+        var before = await Probe(full);
+        var track = before.streams.Single(s => s.IsSubtitle);
+
+        var extractTo = Path.Combine(_dir, "Cut.eng.srt.subremover-tmp");
+        var extract = await _runner.RunFfmpeg(FfmpegArgs.Extract(cut, track.index, extractTo, convertToSrt: true), ct);
+        Assert.True(extract.Success, "ffmpeg is expected to report success here; that's the problem being guarded against");
+        var extractProblem = OutputChecks.TruncationMessage(extract.StdErr) ?? OutputChecks.CheckSubtitleFile(extractTo, track, isAss: false);
+        Assert.NotNull(extractProblem);
+
+        var remuxTo = Path.Combine(_dir, "Cut.mkv.subremover-tmp");
+        var remux = await _runner.RunFfmpeg(FfmpegArgs.Remux(cut, remuxTo, "matroska", Array.Empty<int>()), ct);
+        var remuxProblem = OutputChecks.TruncationMessage(remux.StdErr)
+                           ?? RemuxVerifier.Verify(before, await Probe(remuxTo), 0, bytes.Length, new FileInfo(remuxTo).Length);
+        Assert.NotNull(remuxProblem);
+    }
+
+    [Fact]
     public async Task Reads_accented_track_titles_correctly()
     {
         RequireFfmpeg();
