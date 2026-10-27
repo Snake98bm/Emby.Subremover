@@ -71,6 +71,25 @@ public class SubtitlePlannerTests
     }
 
     [Fact]
+    public void Commentary_tracks_are_removed_only_when_asked()
+    {
+        var flagged = Sub(5, "eng");
+        flagged.disposition["comment"] = 1;
+        var probe = Movie(Sub(3, "eng"), Sub(4, "eng", title: "Commentary"), flagged, Sub(6, "eng", title: "Director's commentary"));
+
+        Assert.Empty(SubtitlePlanner.Plan(probe, Keep("eng"), Video).Remove);
+
+        var settings = Keep("eng");
+        settings.RemoveCommentary = true;
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 4, 5, 6 }, Indexes(plan.Remove));
+        Assert.Equal("#5 eng subrip commentary", flagged.Describe());
+        Assert.Equal("#4 eng subrip \"Commentary\"", plan.Remove[0].Describe());
+    }
+
+    [Fact]
     public void Non_subtitle_streams_are_never_touched()
     {
         var plan = SubtitlePlanner.Plan(Movie(Sub(2, "fre")), Keep("eng"), Video);

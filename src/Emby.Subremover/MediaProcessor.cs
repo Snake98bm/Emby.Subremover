@@ -52,6 +52,7 @@ namespace Emby.Subremover
             KeepUndefined = o.KeepUndefined,
             KeepForcedAnyLanguage = o.KeepForcedAnyLanguage,
             RemoveHearingImpaired = o.RemoveHearingImpaired,
+            RemoveCommentary = o.RemoveCommentary,
             ExtractTextSubtitles = o.ExtractTextSubtitles,
             RemoveExtractedFromVideo = o.ExtractTextSubtitles && o.RemoveExtractedFromVideo,
             OcrPictureSubtitles = o.OcrPictureSubtitles,

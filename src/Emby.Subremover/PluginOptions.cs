@@ -75,6 +75,10 @@ namespace Emby.Subremover
         [Description("Removes them even when they are in a language you keep.")]
         public bool RemoveHearingImpaired { get; set; }
 
+        [DisplayName("Remove commentary subtitles")]
+        [Description("Removes subtitle tracks marked as commentary or titled 'Commentary', even when they are in a language you keep.")]
+        public bool RemoveCommentary { get; set; }
+
         [DisplayName("Extract kept text subtitles to .srt files")]
         [Description("Saves kept text subtitles (SRT/ASS/etc.) as files next to the video, which Emby picks up as external subtitles. Picture-based subtitles (PGS/VobSub) can't be extracted to text.")]
         public bool ExtractTextSubtitles { get; set; }

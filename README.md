@@ -13,7 +13,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - **Test on a few files first** – *Max videos per run* and *Only process paths containing* let you try it on a single movie.
 - Optional: extract kept text subtitles to `.srt` files that Emby picks up as external subtitles.
 - Experimental: OCR picture subtitles (PGS/DVD) into text files such as `Movie.pgs.eng.srt`, using the OCR built into Emby's own ffmpeg. The picture track stays in the video, and you choose whether an existing OCR file is kept or replaced. Tesseract language data (about 4 MB per language) is downloaded the first time it's needed.
-- Optional: remove SDH/hearing-impaired tracks, keep forced tracks in any language, keep tracks with no language set.
+- Optional: remove commentary tracks, remove SDH/hearing-impaired tracks, keep forced tracks in any language, keep tracks with no language set.
 
 ## Install
 

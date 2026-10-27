@@ -65,7 +65,12 @@ namespace Emby.Subremover.Core
             || Title.IndexOf("SDH", StringComparison.OrdinalIgnoreCase) >= 0
             || Title.IndexOf("hearing impaired", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        public bool IsCommentary =>
+            Disposition("comment") || Title.IndexOf("commentary", StringComparison.OrdinalIgnoreCase) >= 0;
+
         public string Describe() =>
-            $"#{index} {Language} {codec_name}{(IsForced ? " forced" : "")}{(IsHearingImpaired ? " SDH" : "")}{(Title.Length > 0 ? " \"" + Title + "\"" : "")}";
+            $"#{index} {Language} {codec_name}{(IsForced ? " forced" : "")}{(IsHearingImpaired ? " SDH" : "")}" +
+            $"{(Disposition("comment") && Title.IndexOf("comment", StringComparison.OrdinalIgnoreCase) < 0 ? " commentary" : "")}" +
+            $"{(Title.Length > 0 ? " \"" + Title + "\"" : "")}";
     }
 }

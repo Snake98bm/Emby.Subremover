@@ -11,6 +11,7 @@ namespace Emby.Subremover.Core
         public bool KeepUndefined { get; set; } = true;
         public bool KeepForcedAnyLanguage { get; set; }
         public bool RemoveHearingImpaired { get; set; }
+        public bool RemoveCommentary { get; set; }
         public bool ExtractTextSubtitles { get; set; }
         public bool RemoveExtractedFromVideo { get; set; }
         public bool OcrPictureSubtitles { get; set; }
@@ -25,7 +26,7 @@ namespace Emby.Subremover.Core
         /// <summary>Changes whenever a setting that affects the plan changes, so already-checked videos get checked again.</summary>
         public string Signature() => string.Join("|",
             string.Join(",", KeepLanguages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase)),
-            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting);
+            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting);
     }
 
     public class ExtractJob
@@ -125,6 +126,7 @@ namespace Emby.Subremover.Core
         private static bool ShouldKeep(ProbeStream s, PlannerSettings settings)
         {
             if (settings.RemoveHearingImpaired && s.IsHearingImpaired) return false;
+            if (settings.RemoveCommentary && s.IsCommentary) return false;
             if (settings.KeepLanguages.Contains(s.Language)) return true;
             if (s.Language == "und" && settings.KeepUndefined) return true;
             if (s.IsForced && settings.KeepForcedAnyLanguage) return true;
