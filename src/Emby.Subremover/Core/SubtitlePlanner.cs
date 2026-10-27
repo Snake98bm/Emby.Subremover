@@ -83,10 +83,10 @@ namespace Emby.Subremover.Core
             var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var subtitles = probe.streams.Where(x => x.IsSubtitle).ToList();
 
-            // Languages that keep a regular (not SDH, not forced-only) track. SDH is only removed where one of these
-            // stays, so a video whose only English track is SDH doesn't lose its English subtitles.
+            // Languages that keep a regular (not SDH, forced-only or commentary) track. SDH is only removed where one of
+            // these stays, so a video whose only English track is SDH doesn't lose its English subtitles.
             var regularLanguages = new HashSet<string>(
-                subtitles.Where(x => !x.IsHearingImpaired && !x.IsForced && KeptByLanguage(x, settings)).Select(x => x.Language),
+                subtitles.Where(x => !x.IsHearingImpaired && !x.IsForced && !x.IsCommentary && KeptByLanguage(x, settings)).Select(x => x.Language),
                 StringComparer.OrdinalIgnoreCase);
 
             foreach (var s in subtitles)
@@ -97,7 +97,8 @@ namespace Emby.Subremover.Core
                     continue;
                 }
 
-                if (settings.OcrPictureSubtitles && IsPictureCodec(s.codec_name))
+                // Commentary isn't OCR'd: the text file would show up in Emby as just another subtitle in that language.
+                if (settings.OcrPictureSubtitles && IsPictureCodec(s.codec_name) && !s.IsCommentary)
                 {
                     var tess = Languages.TesseractCode(s.Language);
                     var output = SidecarPath(videoPath, s, usedPaths, "." + PictureCodecMarkers[s.codec_name], ".srt");

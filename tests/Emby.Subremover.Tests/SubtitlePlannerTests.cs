@@ -6,7 +6,7 @@ namespace Emby.Subremover.Tests;
 
 public class SubtitlePlannerTests
 {
-    private const string Video = @"D:\Movies\Heat (1995)\Heat (1995).mkv";
+    private const string Video = @"D:\Movies\My Movie (2020)\My Movie (2020).mkv";
 
     private static PlannerSettings Keep(string languages) => new() { KeepLanguages = PlannerSettings.ParseLanguages(languages) };
 
@@ -73,7 +73,7 @@ public class SubtitlePlannerTests
     [Fact]
     public void Sdh_stays_when_it_is_the_only_track_in_a_kept_language()
     {
-        // Like Batman Begins in the test run: the only English track is SDH, the rest are other languages.
+        // A common Blu-ray layout: the only English track is SDH, the rest are other languages.
         var settings = Keep("eng");
         settings.RemoveHearingImpaired = true;
         var probe = Movie(Sub(3, "eng", codec: "hdmv_pgs_subtitle", sdh: true), Sub(4, "fre", codec: "hdmv_pgs_subtitle"), Sub(5, "spa", codec: "hdmv_pgs_subtitle"));
@@ -82,6 +82,58 @@ public class SubtitlePlannerTests
 
         Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
         Assert.Equal(new[] { 4, 5 }, Indexes(plan.Remove));
+    }
+
+    [Theory]
+    [InlineData("English (CC)", true)]
+    [InlineData("English [CC]", true)]
+    [InlineData("CC", true)]
+    [InlineData("English for Deaf", true)]
+    [InlineData("English [Stripped]", false)]
+    [InlineData("Accented", false)]
+    [InlineData("Occitan", false)]
+    [InlineData("cc", false)]
+    public void Closed_caption_titles_count_as_sdh(string title, bool expected)
+    {
+        Assert.Equal(expected, Sub(2, "eng", title: title).IsHearingImpaired);
+    }
+
+    [Fact]
+    public void Closed_captions_go_when_a_regular_track_stays_and_stay_when_they_are_the_only_one()
+    {
+        var settings = Keep("eng");
+        settings.RemoveHearingImpaired = true;
+
+        var withRegular = Movie(Sub(2, "eng", title: "English (CC)"), Sub(3, "eng", title: "English [Stripped]"), Sub(4, "eng", title: "English"));
+        var plan = SubtitlePlanner.Plan(withRegular, settings, Video);
+        Assert.Equal(new[] { 3, 4 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 2 }, Indexes(plan.Remove));
+
+        var ccOnly = Movie(Sub(3, "eng", title: "English [CC]"), Sub(4, "ita", title: "Italiano"));
+        plan = SubtitlePlanner.Plan(ccOnly, settings, Video);
+        Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 4 }, Indexes(plan.Remove));
+    }
+
+    [Fact]
+    public void A_kept_commentary_track_doesnt_count_as_a_regular_track()
+    {
+        // Before the fix, the SDH track was removed here, leaving only the commentary.
+        var settings = Keep("eng");
+        settings.RemoveHearingImpaired = true;
+        settings.OcrPictureSubtitles = true;
+        var probe = Movie(
+            Sub(2, "eng", codec: "hdmv_pgs_subtitle", title: "English (SDH)"),
+            Sub(3, "fre", codec: "hdmv_pgs_subtitle", title: "French"),
+            Sub(16, "eng", codec: "hdmv_pgs_subtitle", title: "English (Commentary)"));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 2, 16 }, Indexes(plan.Keep));
+        Assert.Equal(new[] { 3 }, Indexes(plan.Remove));
+        // Only the SDH track is OCR'd; the commentary stays in the video but gets no text file.
+        Assert.Equal(new[] { 2 }, plan.Ocr.Select(j => j.Stream.index));
+        Assert.EndsWith("My Movie (2020).pgs.eng.sdh.srt", plan.Ocr[0].OutputPath);
     }
 
     [Fact]
@@ -149,9 +201,9 @@ public class SubtitlePlannerTests
 
         Assert.Equal(new[]
         {
-            @"D:\Movies\Heat (1995)\Heat (1995).eng.srt",
-            @"D:\Movies\Heat (1995)\Heat (1995).eng.forced.srt",
-            @"D:\Movies\Heat (1995)\Heat (1995).eng.ass",
+            @"D:\Movies\My Movie (2020)\My Movie (2020).eng.srt",
+            @"D:\Movies\My Movie (2020)\My Movie (2020).eng.forced.srt",
+            @"D:\Movies\My Movie (2020)\My Movie (2020).eng.ass",
         }.Select(p => p.Replace('\\', Path.DirectorySeparatorChar)), plan.Extract.Select(e => e.OutputPath.Replace('\\', Path.DirectorySeparatorChar)));
         Assert.True(plan.Extract[0].ConvertToSrt);
         Assert.False(plan.Extract[2].ConvertToSrt);
@@ -181,8 +233,8 @@ public class SubtitlePlannerTests
 
         var plan = SubtitlePlanner.Plan(Movie(Sub(2, "eng"), Sub(3, "eng")), settings, Video);
 
-        Assert.EndsWith("Heat (1995).eng.srt", plan.Extract[0].OutputPath);
-        Assert.EndsWith("Heat (1995).eng.track3.srt", plan.Extract[1].OutputPath);
+        Assert.EndsWith("My Movie (2020).eng.srt", plan.Extract[0].OutputPath);
+        Assert.EndsWith("My Movie (2020).eng.track3.srt", plan.Extract[1].OutputPath);
     }
 
     [Fact]
