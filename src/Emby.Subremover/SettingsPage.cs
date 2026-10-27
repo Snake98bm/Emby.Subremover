@@ -33,11 +33,13 @@ namespace Emby.Subremover
             new SettingsPageController(plugin, "Settings", displayName, true, () => false);
 
         /// <summary>
-        /// The same screen as a separate page for the server sidebar: Emby leaves a plugin's main settings page out of the
-        /// sidebar, so the menu entry needs its own page (as in Emby's plugin UI demo).
+        /// The same screen under a second page id ("SubremoverMenu"), which the sidebar entry (Web/sidebar.js) opens.
+        /// Emby doesn't list these new-style pages in the sidebar itself.
         /// </summary>
-        public static SettingsPageController ForSidebar(Plugin plugin, string displayName, Func<bool> showInSidebar) =>
-            new SettingsPageController(plugin, "SubremoverMenu", displayName, false, showInSidebar);
+        public static SettingsPageController ForSidebar(Plugin plugin, string displayName) =>
+            new SettingsPageController(plugin, SidebarPageName, displayName, false, () => false);
+
+        public const string SidebarPageName = "SubremoverMenu";
 
         // Built on every read so the sidebar setting can apply without reinstalling.
         public PluginPageInfo PageInfo => new PluginPageInfo

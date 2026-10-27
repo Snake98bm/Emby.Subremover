@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Emby.Subremover</RootNamespace>
     <AssemblyName>Emby.Subremover</AssemblyName>
-    <Version>0.6.2</Version>
+    <Version>0.6.3</Version>
     <Authors>Snake98bm</Authors>
     <Description>Emby plugin that removes unwanted embedded subtitle tracks from video files.</Description>
     <!-- Override on the command line to check against another Emby release: -p:EmbySdkVersion=4.10.0.24-beta2 -->
@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <EmbeddedResource Include="thumb.png" LogicalName="Emby.Subremover.thumb.png" />
+    <EmbeddedResource Include="Web\sidebar.html" LogicalName="Emby.Subremover.Web.sidebar.html" />
+    <EmbeddedResource Include="Web\sidebar.js" LogicalName="Emby.Subremover.Web.sidebar.js" />
   </ItemGroup>
 
   <ItemGroup>

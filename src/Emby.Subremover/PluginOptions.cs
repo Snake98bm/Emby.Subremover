@@ -121,7 +121,7 @@ namespace Emby.Subremover
         public string OnlyPathContains { get; set; } = string.Empty;
 
         [DisplayName("Show in the server sidebar menu")]
-        [Description("Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. Reload the page after changing this.")]
+        [Description("Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. Reload the page (or restart Emby) after changing this.")]
         public bool ShowInSidebar { get; set; } = true;
 
         [DisplayName("Re-check every video on next run")]
