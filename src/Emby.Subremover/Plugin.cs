@@ -5,6 +5,7 @@ using System.Linq;
 using Emby.Subremover.Core;
 using Emby.Subremover.ScheduledTasks;
 using Emby.Web.GenericEdit.Common;
+using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Common;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
@@ -23,6 +24,7 @@ namespace Emby.Subremover
         private readonly IApplicationHost _applicationHost;
         private readonly ILibraryManager _libraryManager;
         private readonly OptionsStore _store;
+        private readonly StateStore _state;
         private readonly List<IPluginUIPageController> _pages;
 
         public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager)
@@ -34,6 +36,7 @@ namespace Emby.Subremover
                 Name,
                 applicationHost.Resolve<IJsonSerializer>(),
                 applicationHost.Resolve<ILogManager>().GetLogger(Name));
+            _state = new StateStore(applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, applicationHost.Resolve<IJsonSerializer>());
             _pages = new List<IPluginUIPageController> { new SettingsPageController(this) };
             Instance = this;
         }
@@ -63,9 +66,33 @@ namespace Emby.Subremover
             return info;
         }
 
-        // The task manager is looked up on click rather than at startup, when not every service is ready yet.
-        internal void RunNow() =>
+        // The task manager is looked up when needed rather than at startup, when not every service is ready yet.
+        private IScheduledTaskWorker RemoveTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is RemoveSubtitlesTask);
+
+        /// <returns>The status line to show after the click.</returns>
+        internal StatusItem RunNow()
+        {
+            var worker = RemoveTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return CurrentStatus();
+
             _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RemoveSubtitlesTask>();
+            return RunStatus.Started(DateTime.Now);
+        }
+
+        // Never let a status problem stop the settings page from opening.
+        internal StatusItem CurrentStatus()
+        {
+            try
+            {
+                var worker = RemoveTaskWorker();
+                return RunStatus.Describe(worker?.State, worker?.CurrentProgress, worker?.LastExecutionResult, _state.Load().LastRun);
+            }
+            catch (Exception ex)
+            {
+                return new StatusItem("Status", "Status unavailable: " + ex.Message, ItemStatus.Unknown);
+            }
+        }
 
         internal static void ApplyQuickSetup(PluginOptions options)
         {
@@ -80,6 +107,7 @@ namespace Emby.Subremover
                 .Select(f => new EditorSelectOption { Value = f.ItemId, Name = f.Name, IsEnabled = true })
                 .ToList();
             options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
+            options.RunStatus = CurrentStatus();
             return options;
         }
 

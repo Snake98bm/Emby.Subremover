@@ -75,6 +75,9 @@ namespace Emby.Subremover.ScheduledTasks
             if (problem != null)
             {
                 _log.Error("Subremover: {0}. Fix it under Plugins → Subremover.", problem);
+                var failedState = _store.Load();
+                failedState.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, DryRun = options.DryRun, Problem = problem, LogFile = runLog.FileName };
+                _store.Save(failedState);
                 return;
             }
 
@@ -132,6 +135,19 @@ namespace Emby.Subremover.ScheduledTasks
             }
 
             CleanOldBackups(options, state);
+
+            state.LastRun = new RunSummary
+            {
+                FinishedUtc = DateTime.UtcNow,
+                DryRun = options.DryRun,
+                Changed = counts[Outcome.Changed],
+                WouldChange = counts[Outcome.WouldChange],
+                NothingToDo = counts[Outcome.NothingToDo],
+                AlreadyDone = counts[Outcome.AlreadyDone],
+                Failed = counts[Outcome.Failed],
+                LogFile = runLog.FileName
+            };
+            _store.Save(state);
 
             progress.Report(100);
             runLog.Summary("Subremover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed. Details: {5}",

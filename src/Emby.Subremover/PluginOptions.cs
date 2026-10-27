@@ -31,6 +31,9 @@ namespace Emby.Subremover
             Icon = IconNames.play_arrow
         };
 
+        [DisplayName("")]
+        public StatusItem RunStatus { get; set; } = new StatusItem("Status", "Not run yet");
+
         [DisplayName("Test mode (dry run)")]
         [Description("When on, nothing is changed: the task only writes to its log (Settings → Logs → subremover-…) what it WOULD do. Turn off when the log looks right.")]
         public bool DryRun { get; set; } = true;

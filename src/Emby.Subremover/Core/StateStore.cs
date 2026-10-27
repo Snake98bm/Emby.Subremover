@@ -27,8 +27,25 @@ namespace Emby.Subremover.Core
         public DateTime CreatedUtc { get; set; }
     }
 
+    public class RunSummary
+    {
+        public DateTime FinishedUtc { get; set; }
+        public bool DryRun { get; set; }
+        public int Changed { get; set; }
+        public int WouldChange { get; set; }
+        public int NothingToDo { get; set; }
+        public int AlreadyDone { get; set; }
+        public int Failed { get; set; }
+        public string LogFile { get; set; }
+
+        /// <summary>Set when the run stopped before checking any videos, e.g. no libraries selected.</summary>
+        public string Problem { get; set; }
+    }
+
     public class SubremoverState
     {
+        public RunSummary LastRun { get; set; }
+
         public Dictionary<string, FileStamp> Processed { get; set; } = new Dictionary<string, FileStamp>(StringComparer.OrdinalIgnoreCase);
         public List<BackupEntry> Backups { get; set; } = new List<BackupEntry>();
         public string SettingsSignature { get; set; }

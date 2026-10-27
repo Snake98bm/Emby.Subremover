@@ -82,7 +82,8 @@ namespace Emby.Subremover
 
                 case RunNowCommand:
                     Save();
-                    _plugin.RunNow();
+                    Options.RunStatus = _plugin.RunNow();
+                    UIViewInfoChanged?.Invoke(this, new GenericEventArgs<IPluginUIView>(this));
                     return Task.FromResult<IPluginUIView>(this);
 
                 default:
