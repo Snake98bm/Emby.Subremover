@@ -17,7 +17,14 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 ## Install
 
 1. Download `Emby.Subremover.dll` from the [Releases](../../releases) page, or build it yourself (below).
-2. Stop Emby Server and copy the DLL into Emby's `plugins` folder (e.g. `C:\Emby\programdata\plugins`).
+2. Stop Emby Server and copy the DLL into Emby's `plugins` folder. The default locations are:
+
+   | System | Plugins folder |
+   |---|---|
+   | Windows | `%AppData%\Emby-Server\programdata\plugins` |
+   | Linux | `/var/lib/emby/plugins` |
+
+   If you installed Emby somewhere else, it's the `plugins` folder inside Emby's data folder (the one with `config`, `data` and `logs`).
 3. Start Emby. Go to **Settings → Plugins → Subremover**, pick your libraries and languages, and save.
 4. Go to **Settings → Scheduled Tasks → Subremover → Remove unwanted subtitles** and run it.
 5. With Test mode on, open **Settings → Logs** and read the `Subremover` lines. When they look right, turn Test mode off and run it again.
@@ -29,7 +36,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download). Then, in Powe
 ```powershell
 .\build.ps1            # build + run tests + make artifacts\Emby.Subremover-<version>.zip
 .\build.ps1 test       # just run the tests
-.\build.ps1 deploy -PluginsFolder '\\YOUR-EMBY-PC\C$\Emby\programdata\plugins'
+.\build.ps1 deploy -PluginsFolder "$env:APPDATA\Emby-Server\programdata\plugins"
 ```
 
 `deploy` builds, runs the tests, and copies the plugin into Emby. It refuses to deploy if any test fails, and it first saves the installed DLL to a `subremover-backups` folder so you can go back.

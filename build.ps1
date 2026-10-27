@@ -5,7 +5,7 @@
 .EXAMPLE
   .\build.ps1                      # build + test + package (the default)
   .\build.ps1 test                 # just run the tests
-  .\build.ps1 deploy -PluginsFolder '\\EMBYPC\C$\Emby\programdata\plugins'
+  .\build.ps1 deploy -PluginsFolder "$env:APPDATA\Emby-Server\programdata\plugins"
 #>
 param(
     [ValidateSet('all', 'build', 'test', 'package', 'deploy')]
