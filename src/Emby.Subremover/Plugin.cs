@@ -3,22 +3,38 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using Emby.Subremover.Core;
+using Emby.Subremover.ScheduledTasks;
 using Emby.Web.GenericEdit.Common;
 using MediaBrowser.Common;
+using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
-using MediaBrowser.Model.Drawing;
 using MediaBrowser.Controller.Library;
-using MediaBrowser.Controller.Plugins;
+using MediaBrowser.Model.Drawing;
+using MediaBrowser.Model.Logging;
+using MediaBrowser.Model.Plugins;
+using MediaBrowser.Model.Plugins.UI;
+using MediaBrowser.Model.Serialization;
+using MediaBrowser.Model.Tasks;
 
 namespace Emby.Subremover
 {
-    public class Plugin : BasePluginSimpleUI<PluginOptions>, IHasThumbImage
+    public class Plugin : BasePlugin, IHasUIPages, IHasThumbImage
     {
+        private readonly IApplicationHost _applicationHost;
         private readonly ILibraryManager _libraryManager;
+        private readonly OptionsStore _store;
+        private readonly List<IPluginUIPageController> _pages;
 
-        public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager) : base(applicationHost)
+        public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager)
         {
+            _applicationHost = applicationHost;
             _libraryManager = libraryManager;
+            _store = new OptionsStore(
+                applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath,
+                Name,
+                applicationHost.Resolve<IJsonSerializer>(),
+                applicationHost.Resolve<ILogManager>().GetLogger(Name));
+            _pages = new List<IPluginUIPageController> { new SettingsPageController(this) };
             Instance = this;
         }
 
@@ -34,30 +50,37 @@ namespace Emby.Subremover
 
         public Stream GetThumbImage() => GetType().Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
 
-        public PluginOptions Options => GetOptions();
+        public IReadOnlyCollection<IPluginUIPageController> UIPageControllers => _pages.AsReadOnly();
 
-        public void Save(PluginOptions options) => SaveOptions(options);
+        public PluginOptions Options => _store.Get();
 
-        protected override PluginOptions OnBeforeShowUI(PluginOptions options)
+        public void Save(PluginOptions options) => _store.Save(options);
+
+        public override PluginInfo GetPluginInfo()
+        {
+            var info = base.GetPluginInfo();
+            info.ConfigurationFileName = _store.FilePath;
+            return info;
+        }
+
+        // The task manager is looked up on click rather than at startup, when not every service is ready yet.
+        internal void RunNow() =>
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RemoveSubtitlesTask>();
+
+        internal static void ApplyQuickSetup(PluginOptions options)
+        {
+            options.KeepLanguages = "eng";
+            options.KeepUndefined = true;
+        }
+
+        internal PluginOptions PrepareForDisplay(PluginOptions options)
         {
             options.LibraryChoices = _libraryManager.GetVirtualFolders()
                 .Where(f => f.CollectionType != "music" && f.CollectionType != "books" && f.CollectionType != "photos")
                 .Select(f => new EditorSelectOption { Value = f.ItemId, Name = f.Name, IsEnabled = true })
                 .ToList();
-
             options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
-            return base.OnBeforeShowUI(options);
-        }
-
-        protected override bool OnOptionsSaving(PluginOptions options)
-        {
-            if (options.ApplyEnglishPreset)
-            {
-                options.KeepLanguages = "eng";
-                options.KeepUndefined = true;
-                options.ApplyEnglishPreset = false;
-            }
-            return base.OnOptionsSaving(options);
+            return options;
         }
 
         // Codes saved earlier that aren't in the standard list stay selectable, so saving never drops them.

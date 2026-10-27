@@ -3,6 +3,7 @@ using System.ComponentModel;
 using Emby.Subremover.Core;
 using Emby.Web.GenericEdit;
 using Emby.Web.GenericEdit.Common;
+using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Model.Attributes;
 
 namespace Emby.Subremover
@@ -13,17 +14,25 @@ namespace Emby.Subremover
         Replace
     }
 
-    // Emby builds the plugin's settings page automatically from these properties.
+    // Emby builds the plugin's settings page from these properties, in this order.
     public class PluginOptions : EditableOptionsBase
     {
         public override string EditorTitle => "Subremover";
 
         public override string EditorDescription =>
-            "Removes unwanted embedded subtitle tracks from your videos. Run it from Scheduled Tasks → Subremover. " +
-            "Leave Test mode on for your first run and check the Emby log to see what would change.";
+            "Removes unwanted embedded subtitle tracks from your videos. Leave Test mode on for your first run, " +
+            "then check the subremover log under Settings → Logs to see what would change.";
+
+        [DisplayName("")]
+        [Description("Saves your settings, then starts the task. You can also run it from Scheduled Tasks → Subremover.")]
+        public ButtonItem RunNowButton { get; set; } = new ButtonItem("Run now")
+        {
+            CommandId = SettingsPageView.RunNowCommand,
+            Icon = IconNames.play_arrow
+        };
 
         [DisplayName("Test mode (dry run)")]
-        [Description("When on, nothing is changed: the task only writes to the Emby server log what it WOULD do. Turn off when the log looks right.")]
+        [Description("When on, nothing is changed: the task only writes to its log (Settings → Logs → subremover-…) what it WOULD do. Turn off when the log looks right.")]
         public bool DryRun { get; set; } = true;
 
         [DisplayName("Libraries to process")]
@@ -35,9 +44,13 @@ namespace Emby.Subremover
         [Browsable(false)]
         public List<EditorSelectOption> LibraryChoices { get; set; } = new List<EditorSelectOption>();
 
-        [DisplayName("Quick setup: keep English and subtitles with no language")]
-        [Description("Tick this and click Save to select only English below and turn on 'Keep subtitles with no language set'. It unticks itself afterwards.")]
-        public bool ApplyEnglishPreset { get; set; }
+        [DisplayName("")]
+        [Description("Selects only English below, turns on 'Keep subtitles with no language set', and saves.")]
+        public ButtonItem QuickSetupButton { get; set; } = new ButtonItem("Quick setup: English + no language")
+        {
+            CommandId = SettingsPageView.QuickSetupCommand,
+            Icon = IconNames.language
+        };
 
         [DisplayName("Subtitle languages to keep")]
         [Description("Tick every language you want to keep. Embedded subtitles in any language that isn't ticked are removed. Matches all spellings, e.g. ger, deu and de.")]

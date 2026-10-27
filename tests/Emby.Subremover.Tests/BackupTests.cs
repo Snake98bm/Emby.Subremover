@@ -99,7 +99,11 @@ public sealed class BackupTests : IDisposable
     [Fact]
     public void New_file_gets_the_original_permissions_on_unix()
     {
-        if (OperatingSystem.IsWindows()) Assert.Skip("Unix permissions only");
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Unix permissions only");
+            return;
+        }
 
         var movie = Write("Movie.mkv", "original");
         var temp = Write("Movie.mkv.subremover-tmp", "new");
