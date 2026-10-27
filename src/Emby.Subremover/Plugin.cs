@@ -19,7 +19,7 @@ using MediaBrowser.Model.Tasks;
 
 namespace Emby.Subremover
 {
-    public class Plugin : BasePlugin, IHasUIPages, IHasWebPages, IHasThumbImage
+    public class Plugin : BasePlugin, IHasUIPages, IHasThumbImage
     {
         private readonly IApplicationHost _applicationHost;
         private readonly ILibraryManager _libraryManager;
@@ -42,7 +42,7 @@ namespace Emby.Subremover
             _pages = new List<IPluginUIPageController>
             {
                 SettingsPageController.ForPluginList(this, Name),
-                SettingsPageController.ForSidebar(this, Name)
+                SettingsPageController.ForSidebar(this, Name, () => Options.ShowInSidebar)
             };
             Instance = this;
         }
@@ -72,30 +72,6 @@ namespace Emby.Subremover
         public Stream GetThumbImage() => GetType().Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
 
         public IReadOnlyCollection<IPluginUIPageController> UIPageControllers => _pages.AsReadOnly();
-
-        public IEnumerable<PluginPageInfo> GetPages() => SidebarPages(Options.ShowInSidebar);
-
-        /// <summary>
-        /// Emby's server sidebar only lists old-style (HTML) plugin pages, so a small HTML page sits in the sidebar and
-        /// forwards to the SubRemover settings page.
-        /// </summary>
-        internal static IEnumerable<PluginPageInfo> SidebarPages(bool showInSidebar) => new[]
-        {
-            new PluginPageInfo
-            {
-                Name = "SubRemoverSidebar",
-                DisplayName = "SubRemover",
-                EmbeddedResourcePath = "Emby.Subremover.Web.sidebar.html",
-                EnableInMainMenu = showInSidebar,
-                MenuIcon = "subtitles_off",
-                IsMainConfigPage = false
-            },
-            new PluginPageInfo
-            {
-                Name = "SubRemoverSidebarJS",
-                EmbeddedResourcePath = "Emby.Subremover.Web.sidebar.js"
-            }
-        };
 
         public PluginOptions Options => _store.Get();
 

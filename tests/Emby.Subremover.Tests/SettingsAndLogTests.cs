@@ -38,33 +38,25 @@ public sealed class SettingsAndLogTests : IDisposable
     [Fact]
     public void Settings_page_is_in_the_sidebar_and_the_plugin_list()
     {
+        var show = true;
         var settings = SettingsPageController.ForPluginList(null!, "SubRemover").PageInfo;
-        var target = SettingsPageController.ForSidebar(null!, "SubRemover").PageInfo;
+        var sidebar = SettingsPageController.ForSidebar(null!, "SubRemover", () => show);
+
         Assert.True(settings.IsMainConfigPage);
-        Assert.False(target.IsMainConfigPage);
-        Assert.Equal("SubremoverMenu", target.Name);
+        Assert.False(settings.EnableInMainMenu);
+
+        // The sidebar entry is its own page (the one at genericui?PageId=82033f:SubremoverMenu), spelled SubRemover.
+        var menu = sidebar.PageInfo;
+        Assert.Equal("SubremoverMenu", menu.Name);
+        Assert.Equal("SubRemover", menu.DisplayName);
+        Assert.False(menu.IsMainConfigPage);
+        Assert.True(menu.EnableInMainMenu);
+        Assert.Null(menu.MenuSection);
+        Assert.Equal("subtitles_off", menu.MenuIcon);
         Assert.True(new PluginOptions().ShowInSidebar);
 
-        var pages = Plugin.SidebarPages(showInSidebar: true).ToList();
-        var html = pages[0];
-        Assert.True(html.EnableInMainMenu);
-        Assert.False(html.IsMainConfigPage);
-        Assert.Null(html.MenuSection);
-        Assert.Equal("subtitles_off", html.MenuIcon);
-        Assert.Equal("SubRemover", html.DisplayName);
-        Assert.False(Plugin.SidebarPages(showInSidebar: false).First().EnableInMainMenu);
-
-        // The embedded files exist, the HTML loads the script page, and the script opens the SubRemover page.
-        string Resource(string name)
-        {
-            using var stream = typeof(Plugin).Assembly.GetManifestResourceStream(name);
-            Assert.NotNull(stream);
-            return new StreamReader(stream).ReadToEnd();
-        }
-        Assert.Contains("__plugin/" + pages[1].Name, Resource(html.EmbeddedResourcePath));
-        var script = Resource(pages[1].EmbeddedResourcePath);
-        Assert.Contains("genericui?PageId=", script);
-        Assert.Contains(":" + SettingsPageController.SidebarPageName, script);
+        show = false;
+        Assert.False(sidebar.PageInfo.EnableInMainMenu);
     }
 
     [Fact]
