@@ -94,6 +94,22 @@ public class OcrPlannerTests
     }
 
     [Fact]
+    public void Plan_log_lists_every_kind_of_work_including_ocr()
+    {
+        var settings = Ocr("eng");
+        settings.ExtractTextSubtitles = true;
+        var probe = Movie(Sub(2, "eng", codec: "hdmv_pgs_subtitle"), Sub(3, "eng"), Sub(4, "fre", title: "Weird {0} title"));
+
+        var text = MediaProcessor.DescribePlan(Video, SubtitlePlanner.Plan(probe, settings, Video), dryRun: true);
+
+        Assert.Contains("[TEST MODE - no changes]", text);
+        Assert.Contains("keep:    #2 eng hdmv_pgs_subtitle, #3 eng subrip", text);
+        Assert.Contains("remove:  #4 fre subrip \"Weird {0} title\"", text);
+        Assert.Contains("extract: #3 eng subrip -> Heat (1995).eng.srt", text.Replace('\\', '/').Replace("D:/Movies/Heat (1995)/", ""));
+        Assert.Contains("ocr:     #2 eng hdmv_pgs_subtitle -> Heat (1995).pgs.eng.srt", text.Replace('\\', '/').Replace("D:/Movies/Heat (1995)/", ""));
+    }
+
+    [Fact]
     public void Signature_changes_with_settings_but_not_language_order()
     {
         var a = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng,spa") };

@@ -123,17 +123,20 @@ namespace Emby.Subremover
             return ocrFailed ? Outcome.Failed : Outcome.Changed;
         }
 
-        private void LogPlan(string path, SubtitlePlan plan, bool dryRun)
-        {
-            string List(System.Collections.Generic.IEnumerable<ProbeStream> s) => s.Any() ? string.Join(", ", s.Select(x => x.Describe())) : "none";
+        // Logged as one pre-built string: paths and titles may contain braces that would break format placeholders.
+        private void LogPlan(string path, SubtitlePlan plan, bool dryRun) => _log.Info(DescribePlan(path, plan, dryRun));
 
-            _log.Info("Subremover {0}{1}\n    keep:    {2}\n    remove:  {3}\n    extract: {4}",
-                dryRun ? "[TEST MODE - no changes] " : "",
-                path,
-                List(plan.Keep),
-                List(plan.Remove),
-                plan.Extract.Any() ? string.Join(", ", plan.Extract.Select(e => e.Stream.Describe() + " -> " + Path.GetFileName(e.OutputPath))) : "none",
-                plan.Ocr.Any() ? string.Join(", ", plan.Ocr.Select(e => e.Stream.Describe() + " -> " + Path.GetFileName(e.OutputPath))) : "none");
+        internal static string DescribePlan(string path, SubtitlePlan plan, bool dryRun)
+        {
+            string Streams(System.Collections.Generic.IEnumerable<ProbeStream> s) => s.Any() ? string.Join(", ", s.Select(x => x.Describe())) : "none";
+            string Files(System.Collections.Generic.IEnumerable<(ProbeStream Stream, string Output)> jobs) =>
+                jobs.Any() ? string.Join(", ", jobs.Select(j => j.Stream.Describe() + " -> " + Path.GetFileName(j.Output))) : "none";
+
+            return "Subremover " + (dryRun ? "[TEST MODE - no changes] " : "") + path +
+                   "\n    keep:    " + Streams(plan.Keep) +
+                   "\n    remove:  " + Streams(plan.Remove) +
+                   "\n    extract: " + Files(plan.Extract.Select(e => (e.Stream, e.OutputPath))) +
+                   "\n    ocr:     " + Files(plan.Ocr.Select(e => (e.Stream, e.OutputPath)));
         }
 
         private async Task<ProbeResult> Probe(string path, CancellationToken ct)
