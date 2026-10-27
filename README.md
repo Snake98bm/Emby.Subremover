@@ -13,7 +13,8 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - **Test on a few files first** – *Max videos per run* and *Only process paths containing* let you try it on a single movie.
 - Optional: extract kept text subtitles to `.srt` files that Emby picks up as external subtitles.
 - Experimental: OCR picture subtitles (PGS/DVD) into text files such as `Movie.pgs.eng.srt`, using the OCR built into Emby's own ffmpeg. The picture track stays in the video, and you choose whether an existing OCR file is kept or replaced. Tesseract language data (about 4 MB per language) is downloaded the first time it's needed.
-- Optional: remove commentary tracks, remove SDH/hearing-impaired tracks (only when a regular track in the same language stays), keep forced tracks in any language, keep tracks with no language set.
+- Optional: remove commentary tracks, remove SDH/CC/hearing-impaired tracks (only when a regular track in the same language stays), keep forced tracks in any language, keep tracks with no language set.
+- Its own settings page with **Run now**, run status and a log viewer, plus an entry in the server sidebar under **Advanced** (can be turned off).
 
 ## Install
 
@@ -24,11 +25,21 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
    |---|---|
    | Windows | `%AppData%\Emby-Server\programdata\plugins` |
    | Linux | `/var/lib/emby/plugins` |
+   | Docker (emby/embyserver, linuxserver/emby) | `/config/plugins` inside the container |
 
    If you installed Emby somewhere else, it's the `plugins` folder inside Emby's data folder (the one with `config`, `data` and `logs`).
-3. Start Emby. Go to **Settings → Plugins → Subremover**, pick your libraries and languages, and save.
-4. Go to **Settings → Scheduled Tasks → Subremover → Remove unwanted subtitles** and run it.
-5. With Test mode on, open **Settings → Logs** and read the `Subremover` lines. When they look right, turn Test mode off and run it again.
+
+   **Docker:** on the host, that's the `plugins` folder inside the folder you mapped to `/config`, e.g. `/docker/emby/config/plugins`. Stop the container first (`docker stop emby`), and give the DLL the same owner as the other files in that folder (your PUID/PGID). Or copy it straight into the container, using your container's name:
+
+   ```bash
+   docker cp Emby.Subremover.dll emby:/config/plugins/
+   ```
+3. Start Emby (Docker: `docker start emby`) and press **Ctrl+F5** in your browser so the menus reload.
+4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** under **Advanced** in the server sidebar). Pick your libraries and languages, or click **Quick setup: English + no language**, and leave **Test mode** on.
+5. Click **Run now**. The status under the button shows progress, and the run log appears at the bottom of the page.
+6. When the log looks right, turn Test mode off, set **Max videos to change per run** to a few, and run it again. Check those files in Emby before letting it do the rest.
+
+The task is also under **Settings → Scheduled Tasks → SubRemover**, where you can give it a schedule. Each run writes its own `subremover-….txt` log in Emby's log folder; the newest 30 are kept.
 
 ## Build it yourself
 
