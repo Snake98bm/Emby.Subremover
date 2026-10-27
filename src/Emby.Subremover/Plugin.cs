@@ -34,7 +34,7 @@ namespace Emby.Subremover
             _libraryManager = libraryManager;
             _store = new OptionsStore(
                 applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath,
-                Name,
+                SettingsFileName,
                 applicationHost.Resolve<IJsonSerializer>(),
                 applicationHost.Resolve<ILogManager>().GetLogger(Name));
             _logDirectory = applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath;
@@ -49,7 +49,19 @@ namespace Emby.Subremover
 
         public static Plugin Instance { get; private set; }
 
-        public override string Name => "Subremover";
+        // The settings file keeps the name earlier versions used, so saved settings carry over after the rename.
+        private const string SettingsFileName = "Subremover";
+
+        public static string VersionText
+        {
+            get
+            {
+                var v = typeof(Plugin).Assembly.GetName().Version;
+                return $"{v.Major}.{v.Minor}.{v.Build}";
+            }
+        }
+
+        public override string Name => "SubRemover";
 
         public override string Description => "Removes unwanted embedded subtitle tracks from video files, with test mode and backups.";
 

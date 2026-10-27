@@ -64,7 +64,7 @@ namespace Emby.Subremover
             var path = item.Path;
             if (state.IsRestored(path))
             {
-                _log.Debug("Subremover: {0} was restored from its backup, leaving it alone", path);
+                _log.Debug("SubRemover: {0} was restored from its backup, leaving it alone", path);
                 return Outcome.AlreadyDone;
             }
 
@@ -77,7 +77,7 @@ namespace Emby.Subremover
             var plan = SubtitlePlanner.Plan(before, SettingsFrom(options), path);
             if (!plan.HasWork)
             {
-                _log.Debug("Subremover: nothing to do for {0}", path);
+                _log.Debug("SubRemover: nothing to do for {0}", path);
                 if (!options.DryRun)
                 {
                     state.Processed[path] = stamp;
@@ -98,7 +98,7 @@ namespace Emby.Subremover
             finally
             {
                 // Catches temp files from any step that was cancelled or failed part-way.
-                foreach (var file in Leftovers.Clean(path)) _log.Debug("Subremover: deleted leftover {0}", file);
+                foreach (var file in Leftovers.Clean(path)) _log.Debug("SubRemover: deleted leftover {0}", file);
                 state.InProgress = null;
                 store.Save(state);
             }
@@ -121,11 +121,11 @@ namespace Emby.Subremover
                 var problem = await SubtitleOcr.Run(_runner, _tessdata, path, job, ct).ConfigureAwait(false);
                 if (problem == null)
                 {
-                    _log.Info("Subremover: OCR {0} -> {1}", job.Stream.Describe(), job.OutputPath);
+                    _log.Info("SubRemover: OCR {0} -> {1}", job.Stream.Describe(), job.OutputPath);
                 }
                 else
                 {
-                    _log.Warn("Subremover: OCR of {0} in {1} failed: {2}. Will retry next run.", job.Stream.Describe(), path, problem);
+                    _log.Warn("SubRemover: OCR of {0} in {1} failed: {2}. Will retry next run.", job.Stream.Describe(), path, problem);
                     ocrFailed = true;
                 }
             }
@@ -159,7 +159,7 @@ namespace Emby.Subremover
             string Files(System.Collections.Generic.IEnumerable<(ProbeStream Stream, string Output)> jobs) =>
                 jobs.Any() ? string.Join(", ", jobs.Select(j => j.Stream.Describe() + " -> " + Path.GetFileName(j.Output))) : "none";
 
-            return "Subremover " + (dryRun ? "[TEST MODE - no changes] " : "") + path +
+            return "SubRemover " + (dryRun ? "[TEST MODE - no changes] " : "") + path +
                    "\n    keep:    " + Streams(plan.Keep) +
                    "\n    remove:  " + Streams(plan.Remove) +
                    "\n    extract: " + Files(plan.Extract.Select(e => (e.Stream, e.OutputPath))) +
@@ -171,7 +171,7 @@ namespace Emby.Subremover
             var result = await _runner.RunFfprobe(FfmpegArgs.Probe(path), ct).ConfigureAwait(false);
             if (!result.Success)
             {
-                _log.Error("Subremover: ffprobe failed for {0} (exit {1}): {2}", path, result.ExitCode, result.StdErr);
+                _log.Error("SubRemover: ffprobe failed for {0} (exit {1}): {2}", path, result.ExitCode, result.StdErr);
                 return null;
             }
             try
@@ -180,7 +180,7 @@ namespace Emby.Subremover
             }
             catch (Exception ex)
             {
-                _log.ErrorException("Subremover: could not read ffprobe output for {0}", ex, path);
+                _log.ErrorException("SubRemover: could not read ffprobe output for {0}", ex, path);
                 return null;
             }
         }
@@ -201,10 +201,10 @@ namespace Emby.Subremover
                 var existingProblem = OutputChecks.CheckSubtitleFile(job.OutputPath, job.Stream, isAss, compareCount);
                 if (existingProblem == null)
                 {
-                    _log.Info("Subremover: {0} already exists and looks complete, not overwriting", job.OutputPath);
+                    _log.Info("SubRemover: {0} already exists and looks complete, not overwriting", job.OutputPath);
                     return ExtractOutcome.Done;
                 }
-                _log.Warn("Subremover: existing {0} looks incomplete ({1}). Leaving that file alone and keeping {2} in the video.",
+                _log.Warn("SubRemover: existing {0} looks incomplete ({1}). Leaving that file alone and keeping {2} in the video.",
                     job.OutputPath, existingProblem, job.Stream.Describe());
                 return ExtractOutcome.KeepTrackInVideo;
             }
@@ -218,11 +218,11 @@ namespace Emby.Subremover
             if (problem == null)
             {
                 File.Move(temp, job.OutputPath);
-                _log.Info("Subremover: extracted {0} -> {1}", job.Stream.Describe(), job.OutputPath);
+                _log.Info("SubRemover: extracted {0} -> {1}", job.Stream.Describe(), job.OutputPath);
                 return ExtractOutcome.Done;
             }
 
-            _log.Error("Subremover: extracting {0} from {1} failed ({2}). Video left unchanged.", job.Stream.Describe(), videoPath, problem);
+            _log.Error("SubRemover: extracting {0} from {1} failed ({2}). Video left unchanged.", job.Stream.Describe(), videoPath, problem);
             TryDelete(temp);
             return ExtractOutcome.Failed;
         }
@@ -232,7 +232,7 @@ namespace Emby.Subremover
             var muxer = FfmpegArgs.MuxerFor(path);
             if (muxer == null)
             {
-                _log.Warn("Subremover: unsupported container for {0}, skipping", path);
+                _log.Warn("SubRemover: unsupported container for {0}, skipping", path);
                 return false;
             }
 
@@ -246,7 +246,7 @@ namespace Emby.Subremover
                 var failure = !result.Success ? $"exit {result.ExitCode}: {result.StdErr}" : OutputChecks.TruncationMessage(result.StdErr);
                 if (failure != null)
                 {
-                    _log.Error("Subremover: ffmpeg failed for {0} ({1}). Original left unchanged.", path, failure);
+                    _log.Error("SubRemover: ffmpeg failed for {0} ({1}). Original left unchanged.", path, failure);
                     TryDelete(temp);
                     return false;
                 }
@@ -255,7 +255,7 @@ namespace Emby.Subremover
                 var problem = RemuxVerifier.Verify(before, after, plan.Remove.Count, beforeBytes, new FileInfo(temp).Length);
                 if (problem != null)
                 {
-                    _log.Error("Subremover: new file for {0} failed verification ({1}). Original left unchanged.", path, problem);
+                    _log.Error("SubRemover: new file for {0} failed verification ({1}). Original left unchanged.", path, problem);
                     TryDelete(temp);
                     return false;
                 }
@@ -278,13 +278,13 @@ namespace Emby.Subremover
             var result = BackupManager.Replace(path, temp, options.BackupMode, options.BackupFolder);
             if (!result.Success)
             {
-                _log.Error("Subremover: {0}: {1}", path, result.Message);
+                _log.Error("SubRemover: {0}: {1}", path, result.Message);
                 return false;
             }
 
-            if (result.Message != null) _log.Debug("Subremover: {0}: {1}", path, result.Message);
+            if (result.Message != null) _log.Debug("SubRemover: {0}: {1}", path, result.Message);
             if (result.NewBackup != null) state.Backups.Add(result.NewBackup);
-            _log.Info("Subremover: updated {0}{1}", path, result.BackupPath != null ? " (backup: " + result.BackupPath + ")" : " (no backup kept)");
+            _log.Info("SubRemover: updated {0}{1}", path, result.BackupPath != null ? " (backup: " + result.BackupPath + ")" : " (no backup kept)");
             return true;
         }
 

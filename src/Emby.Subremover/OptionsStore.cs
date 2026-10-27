@@ -49,7 +49,7 @@ namespace Emby.Subremover
                 }
                 catch (Exception ex)
                 {
-                    _log.ErrorException("Subremover: could not read settings from {0}, using defaults", ex, FilePath);
+                    _log.ErrorException("SubRemover: could not read settings from {0}, using defaults", ex, FilePath);
                 }
                 return _options;
             }

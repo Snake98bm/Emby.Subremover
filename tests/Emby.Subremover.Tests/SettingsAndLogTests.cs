@@ -58,6 +58,13 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
+    public void Page_title_shows_the_name_and_version()
+    {
+        var version = typeof(Plugin).Assembly.GetName().Version!;
+        Assert.Equal($"SubRemover v{version.Major}.{version.Minor}.{version.Build}", new PluginOptions().EditorTitle);
+    }
+
+    [Fact]
     public void Run_log_writes_every_level_to_its_own_file()
     {
         string path;

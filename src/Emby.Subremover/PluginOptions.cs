@@ -17,14 +17,14 @@ namespace Emby.Subremover
     // Emby builds the plugin's settings page from these properties, in this order.
     public class PluginOptions : EditableOptionsBase
     {
-        public override string EditorTitle => "Subremover";
+        public override string EditorTitle => "SubRemover v" + Plugin.VersionText;
 
         public override string EditorDescription =>
             "Removes unwanted embedded subtitle tracks from your videos. Leave Test mode on for your first run, " +
             "then check the subremover log under Settings → Logs to see what would change.";
 
         [DisplayName("")]
-        [Description("Saves your settings, then starts the task. You can also run it from Scheduled Tasks → Subremover.")]
+        [Description("Saves your settings, then starts the task. You can also run it from Scheduled Tasks → SubRemover.")]
         public ButtonItem RunNowButton { get; set; } = new ButtonItem("Run now")
         {
             CommandId = SettingsPageView.RunNowCommand,
@@ -121,7 +121,7 @@ namespace Emby.Subremover
         public string OnlyPathContains { get; set; } = string.Empty;
 
         [DisplayName("Show in the server sidebar menu")]
-        [Description("Lists Subremover under Advanced in the server sidebar. It's always under Plugins too. Reload the page after changing this.")]
+        [Description("Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. Reload the page after changing this.")]
         public bool ShowInSidebar { get; set; } = true;
 
         [DisplayName("Re-check every video on next run")]
