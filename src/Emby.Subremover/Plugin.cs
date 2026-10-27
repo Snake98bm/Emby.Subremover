@@ -39,7 +39,11 @@ namespace Emby.Subremover
                 applicationHost.Resolve<ILogManager>().GetLogger(Name));
             _logDirectory = applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath;
             _state = new StateStore(applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, applicationHost.Resolve<IJsonSerializer>());
-            _pages = new List<IPluginUIPageController> { new SettingsPageController(this, Name, () => Options.ShowInSidebar) };
+            _pages = new List<IPluginUIPageController>
+            {
+                SettingsPageController.ForPluginList(this, Name),
+                SettingsPageController.ForSidebar(this, Name, () => Options.ShowInSidebar)
+            };
             Instance = this;
         }
 

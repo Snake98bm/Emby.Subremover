@@ -39,18 +39,22 @@ public sealed class SettingsAndLogTests : IDisposable
     public void Settings_page_is_in_the_sidebar_and_the_plugin_list()
     {
         var show = true;
-        var controller = new SettingsPageController(null!, "Subremover", () => show);
+        var settings = SettingsPageController.ForPluginList(null!, "Subremover").PageInfo;
+        var sidebar = SettingsPageController.ForSidebar(null!, "Subremover", () => show);
 
-        var page = controller.PageInfo;
-        Assert.True(page.EnableInMainMenu);
-        Assert.True(page.IsMainConfigPage);
-        Assert.Null(page.MenuSection);
-        Assert.Equal("subtitles_off", page.MenuIcon);
+        Assert.True(settings.IsMainConfigPage);
+        Assert.False(settings.EnableInMainMenu);
+
+        var menu = sidebar.PageInfo;
+        Assert.False(menu.IsMainConfigPage);
+        Assert.True(menu.EnableInMainMenu);
+        Assert.NotEqual(settings.Name, menu.Name);
+        Assert.Null(menu.MenuSection);
+        Assert.Equal("subtitles_off", menu.MenuIcon);
         Assert.True(new PluginOptions().ShowInSidebar);
 
         show = false;
-        Assert.False(controller.PageInfo.EnableInMainMenu);
-        Assert.True(controller.PageInfo.IsMainConfigPage);
+        Assert.False(sidebar.PageInfo.EnableInMainMenu);
     }
 
     [Fact]

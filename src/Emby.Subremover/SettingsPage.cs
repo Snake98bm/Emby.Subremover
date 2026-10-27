@@ -14,22 +14,37 @@ namespace Emby.Subremover
     internal sealed class SettingsPageController : IPluginUIPageController
     {
         private readonly Plugin _plugin;
+        private readonly string _name;
         private readonly string _displayName;
+        private readonly bool _isMainConfigPage;
         private readonly Func<bool> _showInSidebar;
 
-        public SettingsPageController(Plugin plugin, string displayName, Func<bool> showInSidebar)
+        private SettingsPageController(Plugin plugin, string name, string displayName, bool isMainConfigPage, Func<bool> showInSidebar)
         {
             _plugin = plugin;
+            _name = name;
             _displayName = displayName;
+            _isMainConfigPage = isMainConfigPage;
             _showInSidebar = showInSidebar;
         }
 
-        // Built on every read so the sidebar setting applies without restarting Emby.
+        /// <summary>The page opened from Plugins → Subremover.</summary>
+        public static SettingsPageController ForPluginList(Plugin plugin, string displayName) =>
+            new SettingsPageController(plugin, "Settings", displayName, true, () => false);
+
+        /// <summary>
+        /// The same screen as a separate page for the server sidebar: Emby leaves a plugin's main settings page out of the
+        /// sidebar, so the menu entry needs its own page (as in Emby's plugin UI demo).
+        /// </summary>
+        public static SettingsPageController ForSidebar(Plugin plugin, string displayName, Func<bool> showInSidebar) =>
+            new SettingsPageController(plugin, "SubremoverMenu", displayName, false, showInSidebar);
+
+        // Built on every read so the sidebar setting can apply without reinstalling.
         public PluginPageInfo PageInfo => new PluginPageInfo
         {
-            Name = "Settings",
+            Name = _name,
             DisplayName = _displayName,
-            IsMainConfigPage = true,
+            IsMainConfigPage = _isMainConfigPage,
             // No MenuSection: Emby lists plugin pages under "Advanced" in the server sidebar.
             EnableInMainMenu = _showInSidebar(),
             MenuIcon = "subtitles_off"
