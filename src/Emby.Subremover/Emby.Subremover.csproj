@@ -5,7 +5,7 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Emby.Subremover</RootNamespace>
     <AssemblyName>Emby.Subremover</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>Snake98bm</Authors>
     <Description>Emby plugin that removes unwanted embedded subtitle tracks from video files.</Description>
     <!-- Override on the command line to check against another Emby release: -p:EmbySdkVersion=4.10.0.24-beta2 -->
@@ -17,6 +17,10 @@
     <PackageReference Include="MediaBrowser.Server.Core" Version="$(EmbySdkVersion)" />
     <!-- Compile-time only; the Emby server already provides it at runtime. -->
     <PackageReference Include="System.Memory" Version="4.6.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="thumb.png" LogicalName="Emby.Subremover.thumb.png" />
   </ItemGroup>
 
   <ItemGroup>

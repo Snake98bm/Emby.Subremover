@@ -44,6 +44,16 @@ public class LanguageTests
     }
 
     [Fact]
+    public void Logo_is_embedded_in_the_plugin()
+    {
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
+        Assert.NotNull(stream);
+        var header = new byte[4];
+        stream.ReadExactly(header);
+        Assert.Equal(new byte[] { 0x89, (byte)'P', (byte)'N', (byte)'G' }, header);
+    }
+
+    [Fact]
     public void Choices_keep_custom_codes_that_were_saved_before()
     {
         var choices = Plugin.LanguageChoicesFor("eng,qaa");

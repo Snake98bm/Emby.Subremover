@@ -1,15 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using Emby.Subremover.Core;
 using Emby.Web.GenericEdit.Common;
 using MediaBrowser.Common;
+using MediaBrowser.Common.Plugins;
+using MediaBrowser.Model.Drawing;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
 
 namespace Emby.Subremover
 {
-    public class Plugin : BasePluginSimpleUI<PluginOptions>
+    public class Plugin : BasePluginSimpleUI<PluginOptions>, IHasThumbImage
     {
         private readonly ILibraryManager _libraryManager;
 
@@ -26,6 +29,10 @@ namespace Emby.Subremover
         public override string Description => "Removes unwanted embedded subtitle tracks from video files, with test mode and backups.";
 
         public override Guid Id => new Guid("82033f83-61d4-48e1-b20a-831041323b14");
+
+        public ImageFormat ThumbImageFormat => ImageFormat.Png;
+
+        public Stream GetThumbImage() => GetType().Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
 
         public PluginOptions Options => GetOptions();
 
