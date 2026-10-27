@@ -117,7 +117,8 @@ namespace Emby.Subremover
         public int MaxItemsPerRun { get; set; } = 5;
 
         [DisplayName("Only process paths containing")]
-        [Description("Optional. e.g. a single movie folder name, to test on one title.")]
+        [Description("Optional. Only videos whose full path contains this text are processed (or restored); capitals don't matter. " +
+                     "Example: 'Batman Begins (2005)' matches only that movie, '\\Movies\\' matches only your Movies folder. Leave empty for everything.")]
         public string OnlyPathContains { get; set; } = string.Empty;
 
         [DisplayName("Show in the server sidebar menu")]
