@@ -229,6 +229,7 @@ namespace Emby.Subremover
                 return false;
             }
 
+            if (result.Message != null) _log.Debug("Subremover: {0}: {1}", path, result.Message);
             if (result.NewBackup != null) state.Backups.Add(result.NewBackup);
             _log.Info("Subremover: updated {0}{1}", path, result.BackupPath != null ? " (backup: " + result.BackupPath + ")" : " (no backup kept)");
             return true;

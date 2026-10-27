@@ -21,6 +21,7 @@ namespace Emby.Subremover.Core
         {
             var backup = BackupPaths.For(original, mode, backupFolder);
             var created = File.GetCreationTimeUtc(original);
+            var permissionNote = UnixPermissions.CopyFrom(original, replacement);
 
             // An existing backup is from an earlier run and is closer to the true original, so keep it.
             var newBackup = backup != null && !File.Exists(backup);
@@ -71,6 +72,7 @@ namespace Emby.Subremover.Core
             return new ReplaceResult
             {
                 Success = true,
+                Message = permissionNote,
                 BackupPath = backup,
                 NewBackup = newBackup ? new BackupEntry { OriginalPath = original, BackupPath = backup, CreatedUtc = DateTime.UtcNow } : null
             };

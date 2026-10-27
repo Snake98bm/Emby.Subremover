@@ -97,6 +97,23 @@ public sealed class BackupTests : IDisposable
     }
 
     [Fact]
+    public void New_file_gets_the_original_permissions_on_unix()
+    {
+        if (OperatingSystem.IsWindows()) Assert.Skip("Unix permissions only");
+
+        var movie = Write("Movie.mkv", "original");
+        var temp = Write("Movie.mkv.subremover-tmp", "new");
+        const UnixFileMode mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead | UnixFileMode.GroupWrite;
+        File.SetUnixFileMode(movie, mode);
+        File.SetUnixFileMode(temp, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+
+        var result = BackupManager.Replace(movie, temp, BackupMode.NextToOriginal, null);
+
+        Assert.True(result.Success, result.Message);
+        Assert.Equal(mode, File.GetUnixFileMode(movie));
+    }
+
+    [Fact]
     public void A_failed_backup_leaves_the_original_untouched()
     {
         var movie = Write("Movie.mkv", "original");
