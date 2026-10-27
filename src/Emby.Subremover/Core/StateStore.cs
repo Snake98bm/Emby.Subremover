@@ -31,6 +31,7 @@ namespace Emby.Subremover.Core
     {
         public Dictionary<string, FileStamp> Processed { get; set; } = new Dictionary<string, FileStamp>(StringComparer.OrdinalIgnoreCase);
         public List<BackupEntry> Backups { get; set; } = new List<BackupEntry>();
+        public string SettingsSignature { get; set; }
     }
 
     // Kept out of the plugin options so the settings page never has to load thousands of processed paths.

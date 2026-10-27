@@ -32,7 +32,8 @@ namespace Emby.Subremover.ScheduledTasks
             _libraryManager = libraryManager;
             _log = logManager.GetLogger("Subremover");
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
-            _processor = new MediaProcessor(FfmpegRunner.FromEmby(ffmpegManager), libraryMonitor, providerManager, fileSystem, json, _log);
+            _processor = new MediaProcessor(FfmpegRunner.FromEmby(ffmpegManager), libraryMonitor, providerManager, fileSystem, json, _log,
+                new Tessdata(Path.Combine(appPaths.DataPath, "subremover")));
         }
 
         public string Name => "Remove unwanted subtitles";
@@ -63,6 +64,15 @@ namespace Emby.Subremover.ScheduledTasks
                 _store.Save(state);
                 options.ReprocessAll = false;
                 Plugin.Instance.Save(options);
+            }
+
+            var signature = MediaProcessor.SettingsFrom(options).Signature();
+            if (!options.DryRun && state.SettingsSignature != signature)
+            {
+                if (state.Processed.Count > 0) _log.Info("Subremover: settings changed since the last run - checking every video again");
+                state.Processed.Clear();
+                state.SettingsSignature = signature;
+                _store.Save(state);
             }
 
             var items = FindVideos(options);

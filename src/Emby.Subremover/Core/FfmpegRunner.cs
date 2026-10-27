@@ -37,14 +37,16 @@ namespace Emby.Subremover.Core
             () => (ffmpeg.FfmpegConfiguration.EnvironmentVariables ?? Array.Empty<EnvironmentVariableSetting>())
                 .Select(v => new KeyValuePair<string, string>(v.VariableName, v.Value)));
 
-        public Task<ProcessResult> RunFfmpeg(IList<string> args, CancellationToken ct) => Run(_ffmpegPath(), args, ct);
+        public Task<ProcessResult> RunFfmpeg(IList<string> args, CancellationToken ct, string workingDirectory = null) =>
+            Run(_ffmpegPath(), args, ct, workingDirectory);
 
-        public Task<ProcessResult> RunFfprobe(IList<string> args, CancellationToken ct) => Run(_ffprobePath(), args, ct);
+        public Task<ProcessResult> RunFfprobe(IList<string> args, CancellationToken ct) => Run(_ffprobePath(), args, ct, null);
 
-        private async Task<ProcessResult> Run(string exe, IList<string> args, CancellationToken ct)
+        private async Task<ProcessResult> Run(string exe, IList<string> args, CancellationToken ct, string workingDirectory)
         {
             var psi = new ProcessStartInfo(exe, FfmpegArgs.ToCommandLine(args))
             {
+                WorkingDirectory = workingDirectory ?? string.Empty,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,

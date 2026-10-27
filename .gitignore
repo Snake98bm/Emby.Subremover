@@ -17,3 +17,6 @@ tools/ffmpeg/
 # OS
 Thumbs.db
 .DS_Store
+
+# Tesseract language data for local OCR tests
+tools/tessdata/

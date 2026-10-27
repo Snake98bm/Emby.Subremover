@@ -124,5 +124,23 @@ namespace Emby.Subremover.Core
 
         public static string NameOf(string code) =>
             All.FirstOrDefault(l => l.Code == code)?.Name ?? code;
+
+        // Tesseract names its data files by ISO 639-2/T, which differs from the /B codes for these.
+        private static readonly Dictionary<string, string> TesseractOverrides = new Dictionary<string, string>
+        {
+            { "alb", "sqi" }, { "arm", "hye" }, { "baq", "eus" }, { "bur", "mya" }, { "chi", "chi_sim" },
+            { "cze", "ces" }, { "dut", "nld" }, { "fre", "fra" }, { "geo", "kat" }, { "ger", "deu" },
+            { "gre", "ell" }, { "ice", "isl" }, { "mac", "mkd" }, { "may", "msa" }, { "per", "fas" },
+            { "rum", "ron" }, { "slo", "slk" }, { "wel", "cym" }, { "yue", "chi_tra" },
+        };
+
+        /// <summary>Tesseract language data name for a subtitle language; untagged tracks are read as English; null when unsupported.</summary>
+        public static string TesseractCode(string code)
+        {
+            var normalized = Normalize(code);
+            if (normalized == "und") return "eng";
+            if (TesseractOverrides.TryGetValue(normalized, out var tess)) return tess;
+            return All.Any(l => l.Code == normalized) ? normalized : null;
+        }
     }
 }

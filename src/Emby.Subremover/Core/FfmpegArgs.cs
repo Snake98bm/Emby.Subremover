@@ -52,6 +52,16 @@ namespace Emby.Subremover.Core
             "-map", "0:" + streamIndex, "-c:s", convertToSrt ? "srt" : "copy", output
         };
 
+        // graphicsub2text exists only in Emby's ffmpeg build. The tessdata path is relative to the process working
+        // directory because a Windows drive colon would need double escaping inside a filter graph.
+        public static IList<string> Ocr(string input, int streamIndex, string tesseractLanguage, string output) => new List<string>
+        {
+            "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", input,
+            "-filter_complex",
+            $"[0:{streamIndex}]graphicsub2text=tessdata_path=tessdata/:language={tesseractLanguage}:ocr_mode=lstm:recognize=italic[ocr]",
+            "-map", "[ocr]", "-c:s", "srt", "-f", "srt", output
+        };
+
         // .NET Standard 2.0 has no ProcessStartInfo.ArgumentList, so quote per the Windows/.NET argv rules.
         public static string ToCommandLine(IEnumerable<string> args) => string.Join(" ", args.Select(Quote));
 

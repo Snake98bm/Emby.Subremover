@@ -32,10 +32,12 @@ namespace Emby.Subremover
         private readonly IFileSystem _fileSystem;
         private readonly IJsonSerializer _json;
         private readonly ILogger _log;
+        private readonly Tessdata _tessdata;
 
         public MediaProcessor(FfmpegRunner runner, ILibraryMonitor libraryMonitor, IProviderManager providerManager,
-            IFileSystem fileSystem, IJsonSerializer json, ILogger log)
+            IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata)
         {
+            _tessdata = tessdata;
             _runner = runner;
             _libraryMonitor = libraryMonitor;
             _providerManager = providerManager;
@@ -51,7 +53,9 @@ namespace Emby.Subremover
             KeepForcedAnyLanguage = o.KeepForcedAnyLanguage,
             RemoveHearingImpaired = o.RemoveHearingImpaired,
             ExtractTextSubtitles = o.ExtractTextSubtitles,
-            RemoveExtractedFromVideo = o.ExtractTextSubtitles && o.RemoveExtractedFromVideo
+            RemoveExtractedFromVideo = o.ExtractTextSubtitles && o.RemoveExtractedFromVideo,
+            OcrPictureSubtitles = o.OcrPictureSubtitles,
+            OcrReplaceExisting = o.OcrExistingFile == ExistingOcrFile.Replace
         };
 
         public async Task<Outcome> Process(BaseItem item, PluginOptions options, SubremoverState state, StateStore store, CancellationToken ct)
@@ -83,13 +87,32 @@ namespace Emby.Subremover
                 if (!await Extract(path, job, ct).ConfigureAwait(false)) return Outcome.Failed;
             }
 
+            // OCR before the remux: the stream indexes in the plan belong to the original file.
+            var ocrFailed = false;
+            foreach (var job in plan.Ocr)
+            {
+                var problem = await SubtitleOcr.Run(_runner, _tessdata, path, job, ct).ConfigureAwait(false);
+                if (problem == null)
+                {
+                    _log.Info("Subremover: OCR {0} -> {1}", job.Stream.Describe(), job.OutputPath);
+                }
+                else
+                {
+                    _log.Warn("Subremover: OCR of {0} in {1} failed: {2}. Will retry next run.", job.Stream.Describe(), path, problem);
+                    ocrFailed = true;
+                }
+            }
+
             if (plan.NeedsRemux)
             {
                 if (!await RemuxAndSwap(path, before, plan, options, state, ct).ConfigureAwait(false)) return Outcome.Failed;
             }
 
-            state.Processed[path] = FileStamp.Of(path);
-            store.Save(state);
+            if (!ocrFailed)
+            {
+                state.Processed[path] = FileStamp.Of(path);
+                store.Save(state);
+            }
 
             _providerManager.QueueRefresh(item.InternalId, new MetadataRefreshOptions(_fileSystem)
             {
@@ -97,7 +120,7 @@ namespace Emby.Subremover
                 ReplaceAllMetadata = false
             }, RefreshPriority.Normal);
 
-            return Outcome.Changed;
+            return ocrFailed ? Outcome.Failed : Outcome.Changed;
         }
 
         private void LogPlan(string path, SubtitlePlan plan, bool dryRun)
@@ -109,7 +132,8 @@ namespace Emby.Subremover
                 path,
                 List(plan.Keep),
                 List(plan.Remove),
-                plan.Extract.Any() ? string.Join(", ", plan.Extract.Select(e => e.Stream.Describe() + " -> " + Path.GetFileName(e.OutputPath))) : "none");
+                plan.Extract.Any() ? string.Join(", ", plan.Extract.Select(e => e.Stream.Describe() + " -> " + Path.GetFileName(e.OutputPath))) : "none",
+                plan.Ocr.Any() ? string.Join(", ", plan.Ocr.Select(e => e.Stream.Describe() + " -> " + Path.GetFileName(e.OutputPath))) : "none");
         }
 
         private async Task<ProbeResult> Probe(string path, CancellationToken ct)

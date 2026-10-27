@@ -7,6 +7,12 @@ using MediaBrowser.Model.Attributes;
 
 namespace Emby.Subremover
 {
+    public enum ExistingOcrFile
+    {
+        KeepExisting,
+        Replace
+    }
+
     // Emby builds the plugin's settings page automatically from these properties.
     public class PluginOptions : EditableOptionsBase
     {
@@ -60,6 +66,14 @@ namespace Emby.Subremover
         [DisplayName("...and remove the extracted tracks from the video")]
         [VisibleCondition(nameof(ExtractTextSubtitles), SimpleCondition.IsTrue)]
         public bool RemoveExtractedFromVideo { get; set; }
+
+        [DisplayName("Experimental: convert picture subtitles to text (OCR)")]
+        [Description("Reads kept picture subtitles (PGS/DVD) with OCR and saves them as text next to the video, e.g. 'Movie.pgs.eng.srt'. The picture track stays in the video. Downloads the language data (about 4 MB per language) the first time. OCR can misread words.")]
+        public bool OcrPictureSubtitles { get; set; }
+
+        [DisplayName("If the OCR subtitle file already exists")]
+        [VisibleCondition(nameof(OcrPictureSubtitles), SimpleCondition.IsTrue)]
+        public ExistingOcrFile OcrExistingFile { get; set; } = ExistingOcrFile.KeepExisting;
 
         [DisplayName("Backup of the original file")]
         [Description("NextToOriginal saves 'movie.mkv.subremover.bak' beside the file (Emby ignores it). BackupFolder copies originals to the folder below. None deletes the original — not recommended.")]

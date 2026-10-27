@@ -126,6 +126,39 @@ public sealed class FfmpegIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Ocrs_picture_subtitles_to_a_pgs_marked_srt()
+    {
+        RequireFfmpeg();
+        var toolsDir = Path.GetDirectoryName(FindFfmpegFolder());
+        if (!File.Exists(Path.Combine(toolsDir, "tessdata", "eng.traineddata")))
+            Assert.Skip("tools/tessdata/eng.traineddata not found");
+
+        var srt = Path.Combine(_dir, "lines.srt");
+        File.WriteAllText(srt, Srt("I'll be back in 10 minutes.") + "2\n00:00:02,500 --> 00:00:04,000\n\"Illegal,\" said Lily.\n\n");
+        var video = Path.Combine(_dir, "Picture Subs.mkv");
+        var make = await _runner.RunFfmpeg(new List<string>
+        {
+            "-hide_banner", "-nostdin", "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=0x203040:s=1920x1080:r=24:d=5", "-i", srt,
+            "-filter_complex", "[1:s]text2graphicsub=s=1920x1080[sub]",
+            "-map", "0:v", "-map", "[sub]", "-c:v", "mpeg4", "-c:s", "dvdsub", "-metadata:s:s:0", "language=eng", video
+        }, TestContext.Current.CancellationToken);
+        Assert.True(make.Success, make.StdErr);
+
+        var plan = SubtitlePlanner.Plan(await Probe(video), new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng"), OcrPictureSubtitles = true }, video);
+        var job = Assert.Single(plan.Ocr);
+        Assert.EndsWith("Picture Subs.dvd.eng.srt", job.OutputPath);
+
+        var problem = await SubtitleOcr.Run(_runner, new Tessdata(toolsDir), video, job, TestContext.Current.CancellationToken);
+
+        Assert.Null(problem);
+        var text = File.ReadAllText(job.OutputPath);
+        Assert.Contains("I'll be back in 10 minutes.", text);
+        Assert.Contains("\"Illegal,\" said Lily.", text);
+        Assert.Contains("00:00:00,500 -->", text);
+    }
+
+    [Fact]
     public async Task Handles_paths_with_spaces_quotes_and_unicode()
     {
         RequireFfmpeg();
