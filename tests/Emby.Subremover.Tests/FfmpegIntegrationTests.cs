@@ -114,7 +114,7 @@ public sealed class FfmpegIntegrationTests : IDisposable
     {
         RequireFfmpeg();
         var video = await MakeSampleVideo("Extract Test.mkv");
-        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("fre"), ExtractTextSubtitles = true };
+        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("fre"), KeepUndefined = false, ExtractTextSubtitles = true };
         var plan = SubtitlePlanner.Plan(await Probe(video), settings, video);
         var job = Assert.Single(plan.Extract);
 
