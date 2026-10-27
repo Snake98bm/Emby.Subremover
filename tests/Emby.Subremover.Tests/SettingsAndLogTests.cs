@@ -36,6 +36,24 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
+    public void Settings_page_is_in_the_sidebar_and_the_plugin_list()
+    {
+        var show = true;
+        var controller = new SettingsPageController(null!, "Subremover", () => show);
+
+        var page = controller.PageInfo;
+        Assert.True(page.EnableInMainMenu);
+        Assert.True(page.IsMainConfigPage);
+        Assert.Null(page.MenuSection);
+        Assert.Equal("subtitles_off", page.MenuIcon);
+        Assert.True(new PluginOptions().ShowInSidebar);
+
+        show = false;
+        Assert.False(controller.PageInfo.EnableInMainMenu);
+        Assert.True(controller.PageInfo.IsMainConfigPage);
+    }
+
+    [Fact]
     public void Run_log_writes_every_level_to_its_own_file()
     {
         string path;

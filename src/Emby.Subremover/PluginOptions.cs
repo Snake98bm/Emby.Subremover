@@ -120,6 +120,10 @@ namespace Emby.Subremover
         [Description("Optional. e.g. a single movie folder name, to test on one title.")]
         public string OnlyPathContains { get; set; } = string.Empty;
 
+        [DisplayName("Show in the server sidebar menu")]
+        [Description("Lists Subremover under Advanced in the server sidebar. It's always under Plugins too. Reload the page after changing this.")]
+        public bool ShowInSidebar { get; set; } = true;
+
         [DisplayName("Re-check every video on next run")]
         [Description("Forgets which files were already processed. Switches itself back off after the run.")]
         [IsAdvanced]

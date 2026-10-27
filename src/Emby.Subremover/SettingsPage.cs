@@ -14,20 +14,26 @@ namespace Emby.Subremover
     internal sealed class SettingsPageController : IPluginUIPageController
     {
         private readonly Plugin _plugin;
+        private readonly string _displayName;
+        private readonly Func<bool> _showInSidebar;
 
-        public SettingsPageController(Plugin plugin)
+        public SettingsPageController(Plugin plugin, string displayName, Func<bool> showInSidebar)
         {
             _plugin = plugin;
-            PageInfo = new PluginPageInfo
-            {
-                Name = "Settings",
-                DisplayName = plugin.Name,
-                IsMainConfigPage = true,
-                EnableInMainMenu = false
-            };
+            _displayName = displayName;
+            _showInSidebar = showInSidebar;
         }
 
-        public PluginPageInfo PageInfo { get; }
+        // Built on every read so the sidebar setting applies without restarting Emby.
+        public PluginPageInfo PageInfo => new PluginPageInfo
+        {
+            Name = "Settings",
+            DisplayName = _displayName,
+            IsMainConfigPage = true,
+            // No MenuSection: Emby lists plugin pages under "Advanced" in the server sidebar.
+            EnableInMainMenu = _showInSidebar(),
+            MenuIcon = "subtitles_off"
+        };
 
         public Task Initialize(CancellationToken token) => Task.CompletedTask;
 
