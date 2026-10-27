@@ -21,19 +21,24 @@ namespace Emby.Subremover.ScheduledTasks
     public class RemoveSubtitlesTask : IScheduledTask
     {
         private readonly ILibraryManager _libraryManager;
-        private readonly ILogger _log;
+        private readonly ILogger _embyLog;
+        private readonly string _logDirectory;
         private readonly StateStore _store;
-        private readonly MediaProcessor _processor;
+        private readonly Func<ILogger, MediaProcessor> _newProcessor;
+        private ILogger _log;
 
         public RemoveSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
             ILibraryMonitor libraryMonitor, IProviderManager providerManager, IFileSystem fileSystem,
             IJsonSerializer json, IApplicationPaths appPaths)
         {
             _libraryManager = libraryManager;
-            _log = logManager.GetLogger("Subremover");
+            _embyLog = logManager.GetLogger("Subremover");
+            _log = _embyLog;
+            _logDirectory = appPaths.LogDirectoryPath;
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
-            _processor = new MediaProcessor(FfmpegRunner.FromEmby(ffmpegManager), libraryMonitor, providerManager, fileSystem, json, _log,
-                new Tessdata(Path.Combine(appPaths.DataPath, "subremover")));
+            var runner = FfmpegRunner.FromEmby(ffmpegManager);
+            var tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
+            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata);
         }
 
         public string Name => "Remove unwanted subtitles";
@@ -45,9 +50,26 @@ namespace Emby.Subremover.ScheduledTasks
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            using (var runLog = new RunLog(_logDirectory, "subremover", _embyLog))
+            {
+                _log = runLog;
+                try
+                {
+                    await Run(runLog, cancellationToken, progress).ConfigureAwait(false);
+                }
+                finally
+                {
+                    _log = _embyLog;
+                }
+            }
+        }
+
+        private async Task Run(RunLog runLog, CancellationToken cancellationToken, IProgress<double> progress)
+        {
             var options = Plugin.Instance.Options;
+            var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-            _log.Info("Subremover {0} starting{1}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "");
+            runLog.Summary("Subremover {0} starting{1}. Details: {2}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
 
             var problem = Validate(options);
             if (problem != null)
@@ -88,7 +110,7 @@ namespace Emby.Subremover.ScheduledTasks
                 Outcome outcome;
                 try
                 {
-                    outcome = await _processor.Process(items[i], options, state, _store, cancellationToken).ConfigureAwait(false);
+                    outcome = await processor.Process(items[i], options, state, _store, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -112,8 +134,8 @@ namespace Emby.Subremover.ScheduledTasks
             CleanOldBackups(options, state);
 
             progress.Report(100);
-            _log.Info("Subremover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed",
-                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed]);
+            runLog.Summary("Subremover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed. Details: {5}",
+                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed], runLog.FileName);
         }
 
         private static string Validate(PluginOptions o)

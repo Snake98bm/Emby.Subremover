@@ -16,13 +16,17 @@ namespace Emby.Subremover.ScheduledTasks
     public class RestoreBackupsTask : IScheduledTask
     {
         private readonly ILibraryMonitor _libraryMonitor;
-        private readonly ILogger _log;
+        private readonly ILogger _embyLog;
+        private readonly string _logDirectory;
         private readonly StateStore _store;
+        private ILogger _log;
 
         public RestoreBackupsTask(ILibraryMonitor libraryMonitor, ILogManager logManager, IJsonSerializer json, IApplicationPaths appPaths)
         {
             _libraryMonitor = libraryMonitor;
-            _log = logManager.GetLogger("Subremover");
+            _embyLog = logManager.GetLogger("Subremover");
+            _log = _embyLog;
+            _logDirectory = appPaths.LogDirectoryPath;
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
         }
 
@@ -35,6 +39,23 @@ namespace Emby.Subremover.ScheduledTasks
 
         public Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            using (var runLog = new RunLog(_logDirectory, "subremover-restore", _embyLog))
+            {
+                _log = runLog;
+                try
+                {
+                    Run(runLog, cancellationToken, progress);
+                }
+                finally
+                {
+                    _log = _embyLog;
+                }
+            }
+            return Task.CompletedTask;
+        }
+
+        private void Run(RunLog runLog, CancellationToken cancellationToken, IProgress<double> progress)
+        {
             var options = Plugin.Instance.Options;
             var filter = options.OnlyPathContains?.Trim();
             var state = _store.Load();
@@ -42,7 +63,7 @@ namespace Emby.Subremover.ScheduledTasks
                 .Where(b => string.IsNullOrEmpty(filter) || b.OriginalPath.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
                 .ToList();
 
-            _log.Info("Subremover: restoring {0} backups", entries.Count);
+            runLog.Summary("Subremover: restoring {0} backups. Details: {1}", entries.Count, runLog.FileName);
             var restored = 0;
             for (var i = 0; i < entries.Count; i++)
             {
@@ -80,8 +101,7 @@ namespace Emby.Subremover.ScheduledTasks
 
             _store.Save(state);
             progress.Report(100);
-            _log.Info("Subremover: restored {0} of {1} backups", restored, entries.Count);
-            return Task.CompletedTask;
+            runLog.Summary("Subremover: restored {0} of {1} backups. Details: {2}", restored, entries.Count, runLog.FileName);
         }
     }
 }
