@@ -57,6 +57,9 @@ namespace Emby.Subremover.Core
         /// <summary>The video being changed right now, so leftovers can be cleaned up if Emby stops mid-way.</summary>
         public string InProgress { get; set; }
 
+        /// <summary>Subtitle files SubRemover wrote (extracted or OCR), so they're never taken for files Emby downloaded.</summary>
+        public HashSet<string> MadeFiles { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         public bool IsRestored(string path) => Restored.Contains(path, StringComparer.OrdinalIgnoreCase);
 
         public void MarkRestored(string path)
@@ -79,6 +82,25 @@ namespace Emby.Subremover.Core
         {
             Processed.Clear();
             Restored.Clear();
+        }
+
+        /// <summary>
+        /// For a test-mode run: the lists a real run with these settings would use, so the test shows what that run
+        /// would do. This state isn't changed.
+        /// </summary>
+        public SubremoverState PreviewFor(string signature, bool recheckEverything)
+        {
+            var copy = new SubremoverState
+            {
+                SettingsSignature = SettingsSignature,
+                Processed = new Dictionary<string, FileStamp>(Processed, StringComparer.OrdinalIgnoreCase),
+                Restored = new List<string>(Restored),
+                Backups = new List<BackupEntry>(Backups),
+                MadeFiles = new HashSet<string>(MadeFiles, StringComparer.OrdinalIgnoreCase)
+            };
+            if (recheckEverything) copy.ForgetEverything();
+            copy.ApplySettingsSignature(signature);
+            return copy;
         }
     }
 

@@ -5,13 +5,16 @@
     <LangVersion>latest</LangVersion>
     <RootNamespace>Emby.Subremover</RootNamespace>
     <AssemblyName>Emby.Subremover</AssemblyName>
-    <Version>0.6.8</Version>
+    <Version>0.7.0</Version>
     <Authors>Snake98bm</Authors>
     <Description>Emby plugin that removes unwanted embedded subtitle tracks from video files.</Description>
     <!-- Override on the command line to check against another Emby release: -p:EmbySdkVersion=4.10.0.24-beta2 -->
     <EmbySdkVersion Condition="'$(EmbySdkVersion)' == ''">4.9.1.90</EmbySdkVersion>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
   </PropertyGroup>
+
+  <!-- Local builds from build.ps1 get an alpha version (0.6.9-alpha.N); see Set-AlphaVersion there. -->
+  <Import Project="alpha.props" Condition="Exists('alpha.props')" />
 
   <ItemGroup>
     <PackageReference Include="MediaBrowser.Server.Core" Version="$(EmbySdkVersion)" />

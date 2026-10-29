@@ -81,6 +81,8 @@ namespace Emby.Subremover.ScheduledTasks
             var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             runLog.Summary("SubRemover {0} starting{1}. Details: {2}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
+            // One pre-built string: values such as paths may contain braces.
+            _log.Info("SubRemover settings for this run:\n    " + string.Join("\n    ", options.DescribeSettings()));
 
             var problem = Validate(options);
             if (problem != null)
@@ -116,6 +118,10 @@ namespace Emby.Subremover.ScheduledTasks
             }
             if (!options.DryRun) _store.Save(state);
 
+            // Test mode checks the videos a real run would check now, without forgetting anything.
+            var history = options.DryRun ? state.PreviewFor(signature, options.ReprocessAll) : state;
+            if (options.DryRun && options.ReprocessAll) _log.Info("SubRemover: 'Re-check every video' is on - test mode includes videos already done or restored");
+
             var items = FindVideos(options);
             _log.Info("SubRemover: {0} video files to check", items.Count);
 
@@ -129,7 +135,7 @@ namespace Emby.Subremover.ScheduledTasks
                 Outcome outcome;
                 try
                 {
-                    outcome = await processor.Process(items[i], options, state, _store, cancellationToken).ConfigureAwait(false);
+                    outcome = await processor.Process(items[i], options, history, _store, cancellationToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -168,6 +174,7 @@ namespace Emby.Subremover.ScheduledTasks
             progress.Report(100);
             runLog.Summary("SubRemover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed. Details: {5}",
                 counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed], runLog.FileName);
+            _log.Info(processor.Totals.Describe(options.DryRun));
         }
 
         private static string Validate(PluginOptions o)
@@ -182,6 +189,9 @@ namespace Emby.Subremover.ScheduledTasks
         {
             var selected = new HashSet<string>(options.Libraries.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
             var folders = _libraryManager.GetVirtualFolders().Where(f => selected.Contains(f.ItemId)).ToList();
+            // The settings list only has the libraries' ids; this names them. One pre-built string: paths may contain braces.
+            _log.Info("SubRemover libraries: " + (folders.Count == 0 ? "none found"
+                : string.Join(", ", folders.Select(f => $"{f.Name} ({string.Join("; ", f.Locations ?? Array.Empty<string>())})"))));
             var locations = folders.SelectMany(f => f.Locations ?? Array.Empty<string>()).Select(WithTrailingSeparator).ToArray();
 
             var items = locations.Length == 0
@@ -212,8 +222,7 @@ namespace Emby.Subremover.ScheduledTasks
 
             return items
                 .Where(i => !i.IsShortcut && !string.IsNullOrEmpty(i.Path))
-                .Where(i => string.IsNullOrWhiteSpace(options.OnlyPathContains)
-                            || i.Path.IndexOf(options.OnlyPathContains.Trim(), StringComparison.OrdinalIgnoreCase) >= 0)
+                .Where(i => PathFilter.Matches(i.Path, options.OnlyPathContains))
                 .Where(i => FfmpegArgs.MuxerFor(i.Path) != null && File.Exists(i.Path))
                 .GroupBy(i => i.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())

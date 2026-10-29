@@ -78,6 +78,18 @@ namespace Emby.Subremover.Core
 
         public string Language => Languages.Normalize(Tag("language"));
 
+        /// <summary>Set when the file had no language for this track and SubRemover gave it the guessed one.</summary>
+        public bool LanguageGuessed { get; set; }
+
+        /// <summary>The language guessed from the text of a track with none set, also when the track itself keeps "und".</summary>
+        public string GuessedLanguage { get; set; }
+
+        /// <summary>
+        /// Set when the text of a track with no language set reads like SDH. Only names its extracted file: the track
+        /// itself isn't treated as SDH, so it's never removed for it.
+        /// </summary>
+        public bool LooksHearingImpaired { get; set; }
+
         public string Title => Tag("title") ?? string.Empty;
 
         public bool IsForced => Disposition("forced") || Title.IndexOf("forced", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -96,7 +108,7 @@ namespace Emby.Subremover.Core
             Disposition("comment") || Title.IndexOf("commentary", StringComparison.OrdinalIgnoreCase) >= 0;
 
         public string Describe() =>
-            $"#{index} {Language} {codec_name}{(IsForced ? " forced" : "")}{(IsHearingImpaired ? " SDH" : "")}" +
+            $"#{index} {Language}{(LanguageGuessed ? " (guessed)" : GuessedLanguage == "und" ? $" (text isn't {Language})" : GuessedLanguage != null ? $" (looks {GuessedLanguage})" : "")} {codec_name}{(IsForced ? " forced" : "")}{(IsHearingImpaired ? " SDH" : LooksHearingImpaired ? " (looks SDH)" : "")}" +
             $"{(Disposition("comment") && Title.IndexOf("comment", StringComparison.OrdinalIgnoreCase) < 0 ? " commentary" : "")}" +
             $"{(Title.Length > 0 ? " \"" + Title + "\"" : "")}";
     }

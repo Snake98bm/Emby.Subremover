@@ -125,6 +125,13 @@ namespace Emby.Subremover.Core
         public static string NameOf(string code) =>
             All.FirstOrDefault(l => l.Code == code)?.Name ?? code;
 
+        /// <summary>True for any spelling of a language in the list ("en", "eng", "English" codes alike).</summary>
+        public static bool IsKnown(string code)
+        {
+            var normalized = Normalize(code);
+            return All.Any(l => l.Code == normalized);
+        }
+
         // Tesseract names its data files by ISO 639-2/T, which differs from the /B codes for these.
         private static readonly Dictionary<string, string> TesseractOverrides = new Dictionary<string, string>
         {

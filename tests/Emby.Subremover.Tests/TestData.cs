@@ -5,7 +5,8 @@ namespace Emby.Subremover.Tests;
 
 internal static class TestData
 {
-    public static ProbeStream Sub(int index, string lang, string codec = "subrip", bool forced = false, bool sdh = false, string title = null)
+    public static ProbeStream Sub(int index, string lang, string codec = "subrip", bool forced = false, bool sdh = false, string title = null,
+        bool isDefault = false)
     {
         var tags = new Dictionary<string, string>();
         if (lang != null) tags["language"] = lang;
@@ -16,7 +17,10 @@ internal static class TestData
             codec_type = "subtitle",
             codec_name = codec,
             tags = tags,
-            disposition = new Dictionary<string, int> { ["forced"] = forced ? 1 : 0, ["hearing_impaired"] = sdh ? 1 : 0 }
+            disposition = new Dictionary<string, int>
+            {
+                ["default"] = isDefault ? 1 : 0, ["forced"] = forced ? 1 : 0, ["hearing_impaired"] = sdh ? 1 : 0
+            }
         };
     }
 
