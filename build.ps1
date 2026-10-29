@@ -25,8 +25,35 @@ $outDir    = "src/Emby.Subremover/bin/$Configuration/netstandard2.0"
 $dll       = Join-Path $outDir 'Emby.Subremover.dll'
 $artifacts = Join-Path $PSScriptRoot 'artifacts'
 $version   = ([xml](Get-Content $project)).Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
+$alphaProps = 'src/Emby.Subremover/alpha.props'
+$alphaDone  = 'src/Emby.Subremover/alpha.done'
 
 function Step($name) { Write-Host "`n=== $name ===" -ForegroundColor Cyan }
+
+# Local builds get the next alpha number (0.6.9-alpha.1, -alpha.2, ...) so each one can be told apart in Emby.
+# Emby's plugin list shows it as 0.6.9.1, 0.6.9.2, ... The number starts again at 1 for a new version.
+# GitHub Actions builds without alpha.props (it's git-ignored), so releases keep the plain version.
+# A number is only used up once its build passes the tests (alpha.done), so a failed build is retried with the same one.
+function Set-AlphaVersion {
+    $number = 1
+    $last = if (Test-Path $alphaDone) { (Get-Content $alphaDone -Raw).Trim() }
+            elseif (Test-Path $alphaProps) { ([xml](Get-Content $alphaProps)).Project.PropertyGroup.Version }
+    if ($last -match "^$([regex]::Escape($version))-alpha\.(\d+)$") { $number = [int]$Matches[1] + 1 }
+    $script:version = "$version-alpha.$number"
+    $numeric = (($version -split '-')[0]) + ".$number"
+    @"
+<Project>
+  <!-- Written by build.ps1 for local builds; not committed. -->
+  <PropertyGroup>
+    <Version>$script:version</Version>
+    <AssemblyVersion>$numeric</AssemblyVersion>
+    <FileVersion>$numeric</FileVersion>
+  </PropertyGroup>
+</Project>
+"@ | Set-Content $alphaProps -Encoding UTF8
+}
+
+Set-AlphaVersion
 
 function Invoke-Build {
     Step "Build $version ($Configuration)"
@@ -37,7 +64,8 @@ function Invoke-Build {
 function Invoke-Test {
     Step 'Test'
     dotnet test -c $Configuration
-    if ($LASTEXITCODE) { throw 'Tests failed - not packaging or deploying' }
+    if ($LASTEXITCODE) { throw "Tests failed - not packaging or deploying. The DLL in $outDir ($version) is untested; don't install it." }
+    Set-Content $alphaDone $version
 }
 
 function Invoke-Package {

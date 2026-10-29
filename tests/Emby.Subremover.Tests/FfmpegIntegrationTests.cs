@@ -110,6 +110,86 @@ public sealed class FfmpegIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task Moves_the_default_flag_from_sdh_to_the_regular_track_and_keeps_the_other_flags()
+    {
+        RequireFfmpeg();
+        var video = Path.Combine(_dir, "Default Test.mkv");
+        var args = new List<string>
+        {
+            "-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x120:rate=10"
+        };
+        for (var i = 0; i < 3; i++)
+        {
+            var srt = Path.Combine(_dir, $"default{i}.srt");
+            File.WriteAllText(srt, Srt("Line " + i));
+            args.AddRange(new[] { "-i", srt });
+        }
+        args.AddRange(new[]
+        {
+            "-map", "0:v", "-map", "1:s", "-map", "2:s", "-map", "3:s", "-c:v", "mpeg4", "-c:s", "srt",
+            "-metadata:s:s:0", "language=fre", "-metadata:s:s:1", "language=eng", "-metadata:s:s:2", "language=eng",
+            "-disposition:s:0", "0", "-disposition:s:1", "default+hearing_impaired", "-disposition:s:2", "0", video
+        });
+        var made = await _runner.RunFfmpeg(args, TestContext.Current.CancellationToken);
+        Assert.True(made.Success, made.StdErr);
+
+        var before = await Probe(video);
+        var plan = SubtitlePlanner.Plan(before, new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng"), MakeRegularDefault = true }, video);
+        Assert.Equal(3, plan.NewDefault.index);
+
+        var temp = video + ".subremover-tmp";
+        var removed = plan.Remove.Select(s => s.index).ToList();
+        var remux = await _runner.RunFfmpeg(FfmpegArgs.Remux(video, temp, "matroska", removed, plan.DefaultChanges()), TestContext.Current.CancellationToken);
+        Assert.True(remux.Success, remux.StdErr);
+
+        var after = await Probe(temp);
+        Assert.Null(RemuxVerifier.Verify(before, after, plan.Remove.Count, new FileInfo(video).Length, new FileInfo(temp).Length));
+        Assert.Null(RemuxVerifier.CheckDefault(after, FfmpegArgs.OutputIndex(plan.NewDefault.index, removed)));
+        var subs = after.streams.Where(s => s.IsSubtitle).ToList();
+        Assert.True(subs[0].IsHearingImpaired);
+        Assert.False(subs[0].Disposition("default"));
+    }
+
+    [Fact]
+    public async Task Guesses_untagged_subtitle_languages_and_writes_the_kept_ones_into_the_video()
+    {
+        RequireFfmpeg();
+        var ct = TestContext.Current.CancellationToken;
+        var video = Path.Combine(_dir, "Guess Test.mkv");
+        var dialogue = new[]
+        {
+            "I don't know what you want from me. We have to go there right now, okay? Yeah, I think that is the right thing to do. You can get the car and we will meet at the house. They are not going to wait for us all night, so just be ready.",
+            "Je ne sais pas ce que tu veux. Nous devons partir maintenant, d'accord ? Oui, je pense que c'est la bonne chose à faire. Tu peux prendre la voiture et nous allons nous retrouver à la maison. Ils ne vont pas attendre toute la nuit, alors sois prêt avec moi."
+        };
+        var args = new List<string> { "-hide_banner", "-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc=duration=3:size=160x120:rate=10" };
+        for (var i = 0; i < dialogue.Length; i++)
+        {
+            var srt = Path.Combine(_dir, $"guess{i}.srt");
+            File.WriteAllText(srt, Srt(dialogue[i]));
+            args.AddRange(new[] { "-i", srt });
+        }
+        args.AddRange(new[] { "-map", "0:v", "-map", "1:s", "-map", "2:s", "-c:v", "mpeg4", "-c:s", "srt", video });
+        var made = await _runner.RunFfmpeg(args, ct);
+        Assert.True(made.Success, made.StdErr);
+
+        var before = await Probe(video);
+        var guesses = await SubtitleLanguageGuessing.Run(_runner, video, before, ct);
+        Assert.Equal(new[] { "eng", "fre" }, guesses.Select(g => g.Guess.Language));
+
+        var plan = SubtitlePlanner.Plan(before, new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng") }, video);
+        Assert.Equal(new[] { 2 }, plan.Remove.Select(s => s.index));
+
+        var temp = video + ".subremover-tmp";
+        var removed = plan.Remove.Select(s => s.index).ToList();
+        var remux = await _runner.RunFfmpeg(FfmpegArgs.Remux(video, temp, "matroska", removed, plan.DefaultChanges(), plan.LanguageChanges()), ct);
+        Assert.True(remux.Success, remux.StdErr);
+
+        var after = await Probe(temp);
+        Assert.Null(RemuxVerifier.Verify(before, after, plan.Remove.Count, new FileInfo(video).Length, new FileInfo(temp).Length));
+        Assert.Null(RemuxVerifier.CheckLanguages(after, new Dictionary<int, string> { [1] = "eng" }));
+    }
+
+    [Fact]
     public async Task Extracts_a_text_subtitle_to_an_srt_file()
     {
         RequireFfmpeg();

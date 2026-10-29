@@ -61,6 +61,10 @@ namespace Emby.Subremover.ScheduledTasks
             return Task.CompletedTask;
         }
 
+        /// <summary>The backups whose video path matches <paramref name="filter"/> (see <see cref="PathFilter"/>); all of them when it's empty.</summary>
+        internal static List<BackupEntry> Matching(IEnumerable<BackupEntry> backups, string filter) =>
+            backups.Where(b => PathFilter.Matches(b.OriginalPath, filter)).ToList();
+
         private void Run(RunLog runLog, CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
@@ -73,9 +77,11 @@ namespace Emby.Subremover.ScheduledTasks
                 _store.Save(state);
             }
 
-            var entries = state.Backups
-                .Where(b => string.IsNullOrEmpty(filter) || b.OriginalPath.IndexOf(filter, StringComparison.OrdinalIgnoreCase) >= 0)
-                .ToList();
+            // Started from the Restore button: exactly the videos left ticked there. From Scheduled Tasks: the path filter.
+            var ticked = Plugin.Instance?.TakePendingRestore();
+            var entries = ticked != null
+                ? state.Backups.Where(b => ticked.Contains(b.OriginalPath, StringComparer.OrdinalIgnoreCase)).ToList()
+                : Matching(state.Backups, filter);
 
             runLog.Summary("SubRemover: restoring {0} backups. Details: {1}", entries.Count, runLog.FileName);
             var restored = 0;

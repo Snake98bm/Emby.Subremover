@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace Emby.Subremover.Core
 {
@@ -35,6 +37,34 @@ namespace Emby.Subremover.Core
                 return $"new file is less than half the original size ({beforeBytes} -> {afterBytes} bytes)";
 
             return null;
+        }
+
+        /// <returns>A problem unless every stream in <paramref name="languages"/> (by output index) has that language.</returns>
+        public static string CheckLanguages(ProbeResult after, IDictionary<int, string> languages)
+        {
+            foreach (var expected in languages)
+            {
+                var stream = after.streams.FirstOrDefault(s => s.index == expected.Key);
+                if (stream == null || !string.Equals(stream.Language, expected.Value, StringComparison.OrdinalIgnoreCase))
+                    return $"expected stream #{expected.Key} to have language {expected.Value} but found {stream?.Language ?? "no stream"}";
+            }
+            return null;
+        }
+
+        /// <returns>A problem if any of the streams (by output index) is still flagged default.</returns>
+        public static string CheckNotDefault(ProbeResult after, IEnumerable<int> outputIndexes)
+        {
+            var still = outputIndexes.Where(i => after.streams.Any(s => s.index == i && s.Disposition("default"))).ToList();
+            return still.Count == 0 ? null : $"expected #{string.Join(", #", still)} to lose the default flag";
+        }
+
+        /// <returns>A problem unless the subtitle at <paramref name="outputIndex"/> is the only one flagged default.</returns>
+        public static string CheckDefault(ProbeResult after, int outputIndex)
+        {
+            var flagged = after.streams.Where(s => s.IsSubtitle && s.Disposition("default")).Select(s => s.index).ToList();
+            return flagged.Count == 1 && flagged[0] == outputIndex
+                ? null
+                : $"expected only subtitle #{outputIndex} to be default but found {(flagged.Count == 0 ? "none" : "#" + string.Join(", #", flagged))}";
         }
     }
 }

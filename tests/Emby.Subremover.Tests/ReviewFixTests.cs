@@ -173,6 +173,30 @@ public sealed class ReviewFixTests : IDisposable
         Assert.False(state.IsRestored("/m/b.mkv"));
     }
 
+    [Fact]
+    public void Test_mode_sees_what_a_real_run_would_check_without_changing_the_state()
+    {
+        var state = new SubremoverState { SettingsSignature = "old" };
+        state.Processed["/m/a.mkv"] = new FileStamp();
+        state.MarkRestored("/m/b.mkv");
+
+        var sameSettings = state.PreviewFor("old", recheckEverything: false);
+        Assert.Single(sameSettings.Processed);
+        Assert.True(sameSettings.IsRestored("/m/b.mkv"));
+
+        var newSettings = state.PreviewFor("new", recheckEverything: false);
+        Assert.Empty(newSettings.Processed);
+        Assert.True(newSettings.IsRestored("/m/b.mkv"));
+
+        var recheck = state.PreviewFor("old", recheckEverything: true);
+        Assert.Empty(recheck.Processed);
+        Assert.False(recheck.IsRestored("/m/b.mkv"));
+
+        Assert.Equal("old", state.SettingsSignature);
+        Assert.Single(state.Processed);
+        Assert.True(state.IsRestored("/m/b.mkv"));
+    }
+
     // ---- 5. display-only data never reaches the settings file
 
     [Fact]

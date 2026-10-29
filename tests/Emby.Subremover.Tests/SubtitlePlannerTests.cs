@@ -270,4 +270,174 @@ public class SubtitlePlannerTests
         Assert.True(probe.streams[2].IsForced);
         Assert.True(probe.streams[3].IsHearingImpaired);
     }
+
+    private static PlannerSettings KeepWithRegularDefault(string languages)
+    {
+        var settings = Keep(languages);
+        settings.MakeRegularDefault = true;
+        return settings;
+    }
+
+    [Fact]
+    public void Default_flag_moves_from_sdh_to_the_regular_track()
+    {
+        var probe = Movie(Sub(2, "eng", sdh: true, isDefault: true), Sub(3, "eng"), Sub(4, "fre"));
+
+        var plan = SubtitlePlanner.Plan(probe, KeepWithRegularDefault("eng"), Video);
+
+        Assert.Equal(3, plan.NewDefault.index);
+        Assert.Equal(new Dictionary<int, bool> { [2] = false, [3] = true }, plan.DefaultChanges());
+    }
+
+    [Fact]
+    public void Default_flag_moves_to_the_regular_track_when_the_flagged_sdh_track_is_removed()
+    {
+        var settings = KeepWithRegularDefault("eng");
+        settings.RemoveHearingImpaired = true;
+        var probe = Movie(Sub(2, "eng", title: "English (CC)", isDefault: true), Sub(3, "eng"));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 2 }, Indexes(plan.Remove));
+        Assert.Equal(new Dictionary<int, bool> { [3] = true }, plan.DefaultChanges());
+    }
+
+    [Fact]
+    public void Default_flag_moves_from_commentary_and_extra_flags_are_cleared()
+    {
+        var probe = Movie(Sub(2, "eng", title: "Commentary", isDefault: true), Sub(3, "eng", isDefault: true), Sub(4, "eng", sdh: true, isDefault: true));
+
+        var plan = SubtitlePlanner.Plan(probe, KeepWithRegularDefault("eng"), Video);
+
+        Assert.Equal(new Dictionary<int, bool> { [2] = false, [4] = false }, plan.DefaultChanges());
+    }
+
+    [Fact]
+    public void A_video_whose_regular_track_is_already_the_default_is_left_alone()
+    {
+        var probe = Movie(Sub(2, "eng", isDefault: true), Sub(3, "eng", sdh: true));
+
+        var plan = SubtitlePlanner.Plan(probe, KeepWithRegularDefault("eng"), Video);
+
+        Assert.Null(plan.NewDefault);
+        Assert.False(plan.HasWork);
+    }
+
+    [Theory]
+    [InlineData("forced")]   // forced subtitles only show foreign lines; moving the flag would turn on full subtitles
+    [InlineData("sdh only")]
+    [InlineData("option off")]
+    [InlineData("none flagged")]
+    public void Default_flag_stays_where_it_is(string situation)
+    {
+        var probe = situation switch
+        {
+            "forced" => Movie(Sub(2, "eng", forced: true, isDefault: true), Sub(3, "eng"), Sub(4, "eng", sdh: true)),
+            "sdh only" => Movie(Sub(2, "eng", sdh: true, isDefault: true)),
+            "none flagged" => Movie(Sub(2, "eng", sdh: true), Sub(3, "eng")),
+            _ => Movie(Sub(2, "eng", sdh: true, isDefault: true), Sub(3, "eng")),
+        };
+        var settings = situation == "option off" ? Keep("eng") : KeepWithRegularDefault("eng");
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Null(plan.NewDefault);
+        Assert.False(plan.HasWork);
+    }
+
+    [Fact]
+    public void Default_flag_moves_to_the_chosen_language()
+    {
+        var settings = KeepWithRegularDefault("eng, spa");
+        settings.DefaultLanguage = "eng";
+        var probe = Movie(Sub(2, "spa", isDefault: true), Sub(3, "eng", sdh: true), Sub(4, "eng"));
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new Dictionary<int, bool> { [2] = false, [4] = true }, plan.DefaultChanges());
+    }
+
+    [Fact]
+    public void Chosen_language_without_a_regular_track_falls_back_to_the_videos_own_default()
+    {
+        var settings = KeepWithRegularDefault("eng, spa");
+        settings.DefaultLanguage = "eng";
+        var probe = Movie(Sub(2, "spa", sdh: true, isDefault: true), Sub(3, "spa"), Sub(4, "eng", forced: true));
+
+        Assert.Equal(3, SubtitlePlanner.Plan(probe, settings, Video).NewDefault.index);
+    }
+
+    [Fact]
+    public void A_chosen_language_overrides_a_video_without_a_default_or_with_a_forced_one()
+    {
+        var settings = KeepWithRegularDefault("eng, spa");
+        settings.DefaultLanguage = "eng";
+
+        Assert.Equal(new Dictionary<int, bool> { [3] = true }, SubtitlePlanner.Plan(Movie(Sub(2, "spa"), Sub(3, "eng")), settings, Video).DefaultChanges());
+        Assert.Equal(new Dictionary<int, bool> { [2] = false, [3] = true },
+            SubtitlePlanner.Plan(Movie(Sub(2, "eng", forced: true, isDefault: true), Sub(3, "eng")), settings, Video).DefaultChanges());
+        Assert.False(SubtitlePlanner.Plan(Movie(Sub(2, "spa"), Sub(3, "eng", isDefault: true)), settings, Video).HasWork);
+    }
+
+    [Fact]
+    public void Subtitles_with_no_language_are_kept_in_the_video_but_not_extracted()
+    {
+        var settings = Keep("eng");
+        settings.ExtractTextSubtitles = true;
+        settings.RemoveExtractedFromVideo = true;
+        var probe = Movie(Sub(2, "eng"), Sub(3, "und"), Sub(4, null));
+        SubtitleLanguageGuessing.SetGuessedLanguage(probe.streams[4], "eng");
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Equal(new[] { 2, 4 }, plan.Extract.Select(e => e.Stream.index));
+        Assert.Equal(new[] { 3 }, Indexes(plan.Keep));
+    }
+
+    [Fact]
+    public void The_chosen_language_s_sdh_track_gets_the_default_flag_when_it_is_the_only_one()
+    {
+        var settings = KeepWithRegularDefault("eng, spa");
+        settings.DefaultLanguage = "eng";
+
+        var plan = SubtitlePlanner.Plan(Movie(Sub(2, "spa", isDefault: true), Sub(3, "eng", sdh: true)), settings, Video);
+
+        Assert.Equal(new Dictionary<int, bool> { [2] = false, [3] = true }, plan.DefaultChanges());
+    }
+
+    [Fact]
+    public void A_flag_already_on_a_regular_track_stays_there()
+    {
+        var plan = SubtitlePlanner.Plan(Movie(Sub(2, "eng", title: "British"), Sub(3, "eng", isDefault: true)), KeepWithRegularDefault("eng"), Video);
+
+        Assert.Null(plan.NewDefault);
+    }
+
+    [Fact]
+    public void The_default_never_moves_to_a_track_whose_text_is_another_language()
+    {
+        // A "Canadian" track tagged English that reads as French, and the real English track, flagged default, reading like SDH.
+        var probe = Movie(Sub(2, "eng", title: "Canadian"), Sub(3, "eng", isDefault: true));
+        probe.streams[2].GuessedLanguage = "fre";
+        probe.streams[3].LooksHearingImpaired = true;
+
+        Assert.Null(SubtitlePlanner.Plan(probe, KeepWithRegularDefault("eng"), Video).NewDefault);
+
+        var chosen = KeepWithRegularDefault("eng");
+        chosen.DefaultLanguage = "eng";
+        Assert.Null(SubtitlePlanner.Plan(probe, chosen, Video).NewDefault);
+    }
+
+    [Fact]
+    public void A_mislabelled_track_doesnt_get_the_real_sdh_track_removed()
+    {
+        var settings = Keep("eng");
+        settings.RemoveHearingImpaired = true;
+        var probe = Movie(Sub(2, "eng"), Sub(3, "eng", sdh: true));
+        probe.streams[2].GuessedLanguage = "fre";
+
+        var plan = SubtitlePlanner.Plan(probe, settings, Video);
+
+        Assert.Empty(plan.Remove);
+    }
 }

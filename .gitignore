@@ -2,6 +2,8 @@
 bin/
 obj/
 artifacts/
+src/Emby.Subremover/alpha.props
+src/Emby.Subremover/alpha.done
 TestResults/
 
 # Emby's ffmpeg copied in for local tests - never commit binaries

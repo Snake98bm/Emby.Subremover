@@ -43,4 +43,13 @@ public class RemuxVerifierTests
         Assert.NotNull(RemuxVerifier.Verify(Before, new ProbeResult(), 1, 1000, 990));
         Assert.NotNull(RemuxVerifier.Verify(Before, null, 1, 1000, 990));
     }
+
+    [Fact]
+    public void Checks_that_only_the_new_default_subtitle_is_flagged()
+    {
+        Assert.Null(RemuxVerifier.CheckDefault(Movie(Sub(2, "eng", sdh: true), Sub(3, "eng", isDefault: true)), 3));
+        Assert.Equal("expected only subtitle #3 to be default but found none", RemuxVerifier.CheckDefault(Movie(Sub(2, "eng"), Sub(3, "eng")), 3));
+        Assert.Equal("expected only subtitle #3 to be default but found #2, #3",
+            RemuxVerifier.CheckDefault(Movie(Sub(2, "eng", isDefault: true), Sub(3, "eng", isDefault: true)), 3));
+    }
 }

@@ -71,9 +71,10 @@ public class RunStatusTests
     }
 
     [Fact]
-    public void Status_line_sits_right_under_the_run_now_button()
+    public void Status_line_sits_right_under_the_run_now_and_save_buttons()
     {
         var order = typeof(PluginOptions).GetProperties().Select(p => p.Name).ToList();
-        Assert.Equal(order.IndexOf(nameof(PluginOptions.RunNowButton)) + 1, order.IndexOf(nameof(PluginOptions.RunStatus)));
+        Assert.Equal(order.IndexOf(nameof(PluginOptions.RunNowButton)) + 1, order.IndexOf(nameof(PluginOptions.SaveButton)));
+        Assert.Equal(order.IndexOf(nameof(PluginOptions.SaveButton)) + 1, order.IndexOf(nameof(PluginOptions.RunStatus)));
     }
 }
