@@ -284,6 +284,13 @@ namespace Emby.Subremover.Core
             return KeptByLanguage(s, settings);
         }
 
+        /// <summary>
+        /// Whether a track may stay, by its tag or its guessed language. A track that goes either way doesn't need an SDH
+        /// check: whether it's SDH changes nothing.
+        /// </summary>
+        internal static bool MightKeep(ProbeStream s, PlannerSettings settings) =>
+            KeptByLanguage(s, settings) || (s.GuessedLanguage != null && settings.KeepLanguages.Contains(s.GuessedLanguage));
+
         private static bool KeptByLanguage(ProbeStream s, PlannerSettings settings)
         {
             if (settings.RemoveCommentary && s.IsCommentary) return false;

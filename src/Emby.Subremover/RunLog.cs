@@ -132,15 +132,20 @@ namespace Emby.Subremover
         {
             if (string.IsNullOrEmpty(fileName) || !ListFiles(directory).Contains(fileName)) return "No run log yet. Click Run now to create one.";
 
-            string text;
+            var text = ReadAll(directory, fileName);
+            return text.Length <= maxChars
+                ? text
+                : "… (start of the log cut off; open it in a new window for all of it)" + Environment.NewLine + text.Substring(text.Length - maxChars);
+        }
+
+        /// <summary>The whole log, also while a run is still writing to it.</summary>
+        public static string ReadAll(string directory, string fileName)
+        {
             using (var stream = new FileStream(Path.Combine(directory, fileName), FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             using (var reader = new StreamReader(stream, Encoding.UTF8))
             {
-                text = reader.ReadToEnd();
+                return reader.ReadToEnd();
             }
-            return text.Length <= maxChars
-                ? text
-                : "… (start of the log cut off, open the file under Settings → Logs for all of it)" + Environment.NewLine + text.Substring(text.Length - maxChars);
         }
 
         internal static void DeleteOldFiles(string directory, string prefix, int keep)

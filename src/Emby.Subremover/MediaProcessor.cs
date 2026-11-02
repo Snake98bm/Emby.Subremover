@@ -85,11 +85,12 @@ namespace Emby.Subremover
             if (before == null) return Outcome.Failed;
 
             // A guess only for file names is no use when nothing is extracted, and reading the video costs time.
+            var settings = SettingsFrom(options);
             if (options.GuessLanguages && (!options.GuessForFilesOnly || options.ExtractTextSubtitles))
-                await GuessLanguages(path, before, options.GuessForFilesOnly, ct).ConfigureAwait(false);
+                await GuessLanguages(path, before, settings, options.GuessForFilesOnly, ct).ConfigureAwait(false);
 
             var existing = options.PreferExistingFiles ? ExistingSubtitles.Find(path, state.MadeFiles) : null;
-            var plan = SubtitlePlanner.Plan(before, SettingsFrom(options), path, existing);
+            var plan = SubtitlePlanner.Plan(before, settings, path, existing);
             if (!plan.HasWork)
             {
                 _log.Debug("SubRemover: nothing to do for {0}", path);
@@ -173,9 +174,11 @@ namespace Emby.Subremover
             return ocrFailed ? Outcome.Failed : Outcome.Changed;
         }
 
-        private async Task GuessLanguages(string path, ProbeResult probe, bool filesOnly, CancellationToken ct)
+        private async Task GuessLanguages(string path, ProbeResult probe, PlannerSettings settings, bool filesOnly, CancellationToken ct)
         {
-            foreach (var r in await SubtitleLanguageGuessing.Run(_runner, path, probe, ct, filesOnly).ConfigureAwait(false))
+            var readings = await SubtitleLanguageGuessing.Run(_runner, path, probe, ct, filesOnly, s => SubtitlePlanner.MightKeep(s, settings))
+                .ConfigureAwait(false);
+            foreach (var r in readings)
             {
                 var guess = r.Guess;
                 var sdh = guess.SdhReason != null ? $"; looks like SDH ({guess.SdhReason})" : "";

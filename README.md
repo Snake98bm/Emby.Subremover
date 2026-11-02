@@ -9,7 +9,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - **Test mode (on by default)** – logs exactly what *would* change and touches nothing.
 - **Safe replace** – writes a new file, then checks it has the same video and audio tracks, the expected subtitle tracks and the same length. If any check fails, the original stays untouched.
 - **Backups** – the original is kept as `movie.mkv.subremover.bak` next to the video, or copied to a backup folder you choose. Old backups can be deleted automatically after a number of days.
-- **Undo** – the **Restore originals from backups** button on the settings page (or the task of the same name) puts the original files back for the videos matching *Only process paths containing*. Restoring everything needs its own tick.
+- **Undo** – the **Restore originals from backups** button on the settings page lists every video that has a backup; select the ones to put back. The *Restore* scheduled task restores the videos matching *Only process paths containing* instead.
 - **Test on a few files first** – *Max videos per run* and *Only process paths containing* let you try it on a single movie. Separate several titles with `;`, e.g. `My Movie (2020); My Show - S01E02`.
 - Optional: extract kept text subtitles to `.srt` files that Emby picks up as external subtitles.
 - Experimental: OCR picture subtitles (PGS/DVD) into text files such as `Movie.pgs.eng.srt`, using the OCR built into Emby's own ffmpeg. The picture track stays in the video, and you choose whether an existing OCR file is kept or replaced. Tracks that also exist as text in the same language aren't OCR'd; extract the text one instead. Tesseract language data (about 4 MB per language) is downloaded the first time it's needed.
@@ -17,7 +17,8 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - Optional: offer OCR in Emby's subtitle search. Search for subtitles on a video and pick "OCR of the built-in subtitles" to turn its picture track into a text file on demand.
 - Optional: guess the language of text subtitles that have none set (from common words in the first 15 minutes, or the writing system). A guessed track is kept or removed like any other, and a kept one gets the language written into the video. Tracks that share a language are read too, to catch wrong language tags and untitled SDH copies. Or use the guesses only to name extracted files, leaving the video as it is.
 - Optional: remove commentary tracks, remove SDH/CC/hearing-impaired tracks (only when a regular track in the same language stays), keep forced tracks in any language, keep tracks with no language set.
-- Its own settings page with **Run now**, run status and a log viewer, plus an entry in the server sidebar under **Advanced** (can be turned off).
+- Optional: process new videos as Emby adds them. A few minutes after the last one arrives, one run checks just the new videos with your settings (Test mode included), so a whole season gets one run and one log.
+- Its own settings page with **Run now**, run status and a log viewer (open a log in a new window or download it), plus an entry in the server sidebar under **Advanced** (can be turned off).
 
 ## Install
 
@@ -39,7 +40,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
    ```
 3. Start Emby (Docker: `docker start emby`) and press **Ctrl+F5** in your browser so the menus reload.
 4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** under **Advanced** in the server sidebar). Pick your libraries and languages, or click **Quick setup: English + no language**, and leave **Test mode** on.
-5. Click **Run now**. The status under the button shows progress, and the run log appears at the bottom of the page.
+5. Click **Run now**. The status under the button shows progress, and its log appears under **Log files** at the bottom of the page.
 6. When the log looks right, turn Test mode off, set **Max videos to change per run** to a few, and run it again. Check those files in Emby before letting it do the rest.
 
 The task is also under **Settings → Scheduled Tasks → SubRemover**, where you can give it a schedule. Each run writes its own `subremover-….txt` log in Emby's log folder; the newest 30 are kept.

@@ -12,7 +12,7 @@ namespace Emby.Subremover
         internal static readonly (string Setting, string Text)[] Entries =
         {
             ("Run now",
-                "Saves your settings and starts a run. The status under the button shows progress, and the run log appears at the bottom " +
+                "Saves your settings and starts a run. The status under the button shows progress, and the log appears under Log files at the bottom " +
                 "of the page. You can also run or schedule it from Settings > Scheduled Tasks > SubRemover."),
             ("Test mode (dry run)",
                 "When on, nothing is changed: each run only writes to its log what it WOULD do. Leave it on for your first run and turn it " +
@@ -88,11 +88,16 @@ namespace Emby.Subremover
                 "Backups older than this are deleted at the start of a run. 0 keeps them forever."),
             ("Max videos to change per run",
                 "A run stops after changing this many videos. 0 means no limit. Use 1 to 5 while testing; each change can take several " +
-                "minutes over the network."),
+                "minutes over the network. Runs for new videos don't use it: they do every new video."),
             ("Only process paths containing",
                 "Only videos whose full path contains this text are checked; capitals don't matter. 'My Movie (2020)' matches only that " +
                 "movie, '\\Movies\\' only your Movies folder. For several, separate them with ';' (not commas, titles contain those): " +
                 "'My Movie (2020); My Show - S01E02'. Leave empty for everything. Restore doesn't use it."),
+            ("Process new videos as they're added",
+                "When Emby adds a video (real-time monitoring or a library scan), SubRemover checks it with these same settings, " +
+                "Test mode included. It waits until no new video has come in for 3 minutes, so a whole season is one run with one log. " +
+                "Only videos in the libraries above and matching the path filter count. 'Max videos to change per run' doesn't apply: " +
+                "every new video is done. It never runs next to another run: it waits and goes after."),
             ("Restore originals from backups",
                 "Lists every video that has a backup, newest first, with nothing selected. Select the ones to restore, then click 'Yes, " +
                 "restore...': each one is replaced by its original, undoing what SubRemover changed. Subtitle files SubRemover saved stay. " +
@@ -103,8 +108,9 @@ namespace Emby.Subremover
             ("Re-check every video on next run",
                 "Forgets which videos were already done, including ones you restored, so the next real run checks all of them again; it " +
                 "then switches itself off. In test mode it only includes them and forgets nothing."),
-            ("Run log",
-                "Shows the last run. Pick an older run to see its log. The newest 30 are kept."),
+            ("Logs",
+                "Shows the last run. Pick an older run to see its log. The links under it open the whole log in a new window or " +
+                "download it. The newest 30 are kept."),
         };
 
         // The setting's name in bold with its explanation wrapped underneath; plain, without a status icon.
