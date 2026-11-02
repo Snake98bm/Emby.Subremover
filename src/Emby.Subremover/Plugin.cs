@@ -101,6 +101,7 @@ namespace Emby.Subremover
             var worker = RemoveTaskWorker();
             if (worker != null && worker.State != TaskState.Idle) return CurrentStatus();
 
+            NewVideos.Take(); // a full run checks them anyway
             _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RemoveSubtitlesTask>();
             return RunStatus.Started(DateTime.Now);
         }
@@ -125,6 +126,9 @@ namespace Emby.Subremover
 
         internal static List<BackupEntry> NewestFirst(IEnumerable<BackupEntry> backups) =>
             backups.OrderByDescending(b => b.CreatedUtc).ThenBy(b => b.OriginalPath, StringComparer.OrdinalIgnoreCase).ToList();
+
+        // New videos Emby added, handed over by NewVideoWatcher: the next run checks only these.
+        internal PendingVideos NewVideos { get; } = new PendingVideos();
 
         // The videos selected on the restore list, for the restore task to take instead of the path filter.
         private List<string> _pendingRestore;
@@ -241,11 +245,41 @@ namespace Emby.Subremover
                 options.LogChoices = files.Select(f => new EditorSelectOption { Value = f, Name = f, IsEnabled = true }).ToList();
                 if (!files.Contains(options.SelectedLog)) options.SelectedLog = files.FirstOrDefault();
                 options.LogText = RunLog.ReadForDisplay(_logDirectory, options.SelectedLog);
+                options.LogLinks = LogLinksFor(options.SelectedLog, LogLinkKey.Current(DateTime.UtcNow));
             }
             catch (Exception ex)
             {
                 options.LogText = "Couldn't read the run log: " + ex.Message;
             }
+        }
+
+        /// <summary>The secret in the log links on the settings page.</summary>
+        internal LogLinkKey LogLinkKey { get; } = new LogLinkKey();
+
+        /// <summary>"Open this log in a new window" and "Download this log", for the log shown on the page.</summary>
+        internal static GenericItemList LogLinksFor(string logName, string key)
+        {
+            if (string.IsNullOrEmpty(logName)) return new GenericItemList();
+            return new GenericItemList(new[]
+            {
+                new GenericListItem
+                {
+                    PrimaryText = "Open this log in a new window",
+                    Icon = IconNames.open_in_new,
+                    IconMode = ItemListIconMode.SmallRegular,
+                    HyperLink = GetSubremoverLog.Link(logName, key, download: false),
+                    HyperLinkTargetExternal = true
+                },
+                new GenericListItem
+                {
+                    PrimaryText = "Download this log",
+                    SecondaryText = logName,
+                    Icon = IconNames.file_download,
+                    IconMode = ItemListIconMode.SmallRegular,
+                    HyperLink = GetSubremoverLog.Link(logName, key, download: true),
+                    HyperLinkTargetExternal = true
+                }
+            });
         }
 
         // Only the kept languages: the default can't go to a subtitle that gets removed.

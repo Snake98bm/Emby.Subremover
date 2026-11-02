@@ -50,11 +50,16 @@ namespace Emby.Subremover.ScheduledTasks
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
+            // Set when NewVideoWatcher started this run: check only the videos Emby just added.
+            var newVideos = Plugin.Instance.NewVideos.Take();
+
             using (var runLog = new RunLog(_logDirectory, "subremover", _embyLog))
             {
                 if (!TaskGate.TryEnter())
                 {
                     const string busy = "another SubRemover task (restore) is running - try again when it has finished";
+                    // Hand the new videos back, so the next run still gets to them.
+                    Plugin.Instance.NewVideos.AddRange(newVideos);
                     runLog.Summary("SubRemover: {0}", busy);
                     var state = _store.Load();
                     state.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, Problem = busy, LogFile = runLog.FileName };
@@ -65,7 +70,7 @@ namespace Emby.Subremover.ScheduledTasks
                 _log = runLog;
                 try
                 {
-                    await Run(runLog, cancellationToken, progress).ConfigureAwait(false);
+                    await Run(runLog, newVideos, cancellationToken, progress).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -75,12 +80,14 @@ namespace Emby.Subremover.ScheduledTasks
             }
         }
 
-        private async Task Run(RunLog runLog, CancellationToken cancellationToken, IProgress<double> progress)
+        private async Task Run(RunLog runLog, ISet<string> newVideos, CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
             var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
-            runLog.Summary("SubRemover {0} starting{1}. Details: {2}", version, options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
+            runLog.Summary("SubRemover {0} starting{1}{2}. Details: {3}", version,
+                newVideos == null ? "" : " for new videos added to the library",
+                options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
             // One pre-built string: values such as paths may contain braces.
             _log.Info("SubRemover settings for this run:\n    " + string.Join("\n    ", options.DescribeSettings()));
 
@@ -122,10 +129,16 @@ namespace Emby.Subremover.ScheduledTasks
             var history = options.DryRun ? state.PreviewFor(signature, options.ReprocessAll) : state;
             if (options.DryRun && options.ReprocessAll) _log.Info("SubRemover: 'Re-check every video' is on - test mode includes videos already done or restored");
 
-            var items = FindVideos(options);
+            var items = FindVideos(options, newVideos);
+            if (newVideos != null)
+            {
+                _log.Info("SubRemover: {0} new video{1} added; {2} of them in the selected libraries and path filter",
+                    newVideos.Count, newVideos.Count == 1 ? "" : "s", items.Count);
+            }
             _log.Info("SubRemover: {0} video files to check", items.Count);
 
             var counts = Enum.GetValues(typeof(Outcome)).Cast<Outcome>().ToDictionary(o => o, o => 0);
+            var limit = LimitFor(options, newVideosOnly: newVideos != null);
             var changes = 0;
             for (var i = 0; i < items.Count; i++)
             {
@@ -149,9 +162,9 @@ namespace Emby.Subremover.ScheduledTasks
                 counts[outcome]++;
 
                 if (outcome == Outcome.Changed || outcome == Outcome.WouldChange) changes++;
-                if (options.MaxItemsPerRun > 0 && changes >= options.MaxItemsPerRun)
+                if (limit > 0 && changes >= limit)
                 {
-                    _log.Info("SubRemover: reached the limit of {0} videos per run", options.MaxItemsPerRun);
+                    _log.Info("SubRemover: reached the limit of {0} videos per run", limit);
                     break;
                 }
             }
@@ -177,6 +190,9 @@ namespace Emby.Subremover.ScheduledTasks
             _log.Info(processor.Totals.Describe(options.DryRun));
         }
 
+        /// <returns>How many videos a run may change; 0 is no limit. A run for new videos does all of them.</returns>
+        internal static int LimitFor(PluginOptions options, bool newVideosOnly) => newVideosOnly ? 0 : options.MaxItemsPerRun;
+
         private static string Validate(PluginOptions o)
         {
             if (string.IsNullOrWhiteSpace(o.Libraries)) return "no libraries selected";
@@ -185,7 +201,8 @@ namespace Emby.Subremover.ScheduledTasks
             return null;
         }
 
-        private List<BaseItem> FindVideos(PluginOptions options)
+        /// <param name="onlyThese">New videos only: still limited to the libraries and path filter.</param>
+        private List<BaseItem> FindVideos(PluginOptions options, ISet<string> onlyThese)
         {
             var selected = new HashSet<string>(options.Libraries.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
             var folders = _libraryManager.GetVirtualFolders().Where(f => selected.Contains(f.ItemId)).ToList();
@@ -223,6 +240,8 @@ namespace Emby.Subremover.ScheduledTasks
             return items
                 .Where(i => !i.IsShortcut && !string.IsNullOrEmpty(i.Path))
                 .Where(i => PathFilter.Matches(i.Path, options.OnlyPathContains))
+                // Before File.Exists, so a run for a few new videos doesn't touch every file on the share.
+                .Where(i => onlyThese == null || onlyThese.Contains(i.Path))
                 .Where(i => FfmpegArgs.MuxerFor(i.Path) != null && File.Exists(i.Path))
                 .GroupBy(i => i.Path, StringComparer.OrdinalIgnoreCase)
                 .Select(g => g.First())

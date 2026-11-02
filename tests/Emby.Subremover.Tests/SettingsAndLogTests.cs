@@ -385,4 +385,51 @@ public sealed class SettingsAndLogTests : IDisposable
         Assert.Equal(SettingsHelp.Entries.Select(e => e.Setting), shown.Select(s => s.Caption));
         Assert.StartsWith("When on, nothing is changed", shown[1].StatusText);
     }
+
+    [Fact]
+    public void Log_link_secret_lasts_a_day_and_only_matches_itself()
+    {
+        var secret = new LogLinkKey();
+        var now = new DateTime(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
+
+        var key = secret.Current(now);
+        Assert.Equal(32, key.Length);
+        Assert.Equal(key, secret.Current(now.AddHours(23)));
+        Assert.True(secret.IsValid(key, now.AddHours(1)));
+        Assert.False(secret.IsValid(key.Substring(1) + "0", now));
+        Assert.False(secret.IsValid("", now));
+        Assert.False(secret.IsValid(null, now));
+        Assert.False(secret.IsValid(key, now + LogLinkKey.ValidFor + TimeSpan.FromMinutes(1)));
+
+        var next = secret.Current(now + LogLinkKey.ValidFor + TimeSpan.FromMinutes(1));
+        Assert.NotEqual(key, next);
+        Assert.False(new LogLinkKey().IsValid(key, now));
+    }
+
+    [Fact]
+    public void Log_links_open_or_download_the_picked_log()
+    {
+        var links = Plugin.LogLinksFor("subremover-20261029-120000.txt", "abc123");
+
+        Assert.Equal(2, links.Count);
+        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123", links[0].HyperLink);
+        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123&Download=true", links[1].HyperLink);
+        Assert.All(links, l => Assert.True(l.HyperLinkTargetExternal));
+        // Each has its own icon, so they read as buttons.
+        Assert.All(links, l => Assert.NotNull(l.Icon));
+        Assert.NotEqual(links[0].Icon, links[1].Icon);
+        Assert.Empty(Plugin.LogLinksFor(null, "abc123"));
+        Assert.Contains("Name=a%20b%26c.txt", GetSubremoverLog.Link("a b&c.txt", "k", false));
+    }
+
+    [Fact]
+    public void Whole_log_is_read_even_while_a_run_is_writing_it()
+    {
+        var path = Path.Combine(_dir, "subremover-20261029-120000.txt");
+        File.WriteAllText(path, "line 1\nline 2");
+        using (new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite))
+        {
+            Assert.Equal("line 1\nline 2", RunLog.ReadAll(_dir, "subremover-20261029-120000.txt"));
+        }
+    }
 }

@@ -23,7 +23,7 @@ namespace Emby.Subremover
         public override string EditorTitle => "SubRemover v" + Plugin.VersionText;
 
         public override string EditorDescription =>
-            "Removes unwanted embedded subtitle tracks from your videos. Leave Test mode on for your first run and check the run log " +
+            "Removes unwanted embedded subtitle tracks from your videos. Leave Test mode on for your first run and check its log " +
             "at the bottom of the page. Each setting is explained under Help, at the very bottom.";
 
         [DisplayName("")]
@@ -166,6 +166,10 @@ namespace Emby.Subremover
         [Description("Only paths containing this text. Several: separate with ';'.")]
         public string OnlyPathContains { get; set; } = string.Empty;
 
+        [DisplayName("Process new videos as they're added")]
+        [Description("Checks videos Emby adds, a few minutes after they arrive.")]
+        public bool ProcessNewVideos { get; set; }
+
         [DisplayName("")]
         [Description("Lists the videos with a backup to choose from.")]
         public ButtonItem RestoreButton { get; set; } = NewRestoreButton();
@@ -215,7 +219,7 @@ namespace Emby.Subremover
         [DisplayName("")]
         public CaptionItem LogsCaption { get; set; } = new CaptionItem("Log files");
 
-        [DisplayName("Run log")]
+        [DisplayName("Logs")]
         [Description("Pick an older run to see its log.")]
         [SelectItemsSource(nameof(LogChoices))]
         [AutoPostBack(SettingsPageView.ShowLogCommand, nameof(SelectedLog))]
@@ -223,6 +227,10 @@ namespace Emby.Subremover
 
         [Browsable(false)]
         public List<EditorSelectOption> LogChoices { get; set; } = new List<EditorSelectOption>();
+
+        // "Open this log in a new window" and "Download this log", for the log picked above.
+        [DisplayName("")]
+        public GenericItemList LogLinks { get; set; } = new GenericItemList();
 
         [DisplayName("")]
         [EditMultiline(20)]
@@ -262,6 +270,7 @@ namespace Emby.Subremover
         [DisplayName("")] public StatusItem Help27 { get; set; } = SettingsHelp.Item(26);
         [DisplayName("")] public StatusItem Help28 { get; set; } = SettingsHelp.Item(27);
         [DisplayName("")] public StatusItem Help29 { get; set; } = SettingsHelp.Item(28);
+        [DisplayName("")] public StatusItem Help30 { get; set; } = SettingsHelp.Item(29);
 
         /// <summary>Drops the lists and log text that are only filled in for display, so they never go into the settings file.</summary>
         // Filled in only to show the page; not settings.
@@ -294,6 +303,7 @@ namespace Emby.Subremover
             RestoreListShown = null;
             SelectedLog = null;
             LogText = null;
+            LogLinks = new GenericItemList();
         }
     }
 }

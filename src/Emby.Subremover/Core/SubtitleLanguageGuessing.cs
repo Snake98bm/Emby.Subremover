@@ -42,10 +42,11 @@ namespace Emby.Subremover.Core
         /// <summary>
         /// Reads the start of those tracks (one ffmpeg pass for all of them). A track without a language gets the guessed
         /// one; a tagged track only when its text is clearly another language. With <paramref name="filesOnly"/> the track
-        /// keeps its tag and the guess only names its extracted file. Text that reads like SDH marks the track for an .sdh file.
+        /// keeps its tag and the guess only names its extracted file. Text that reads like SDH marks the track for an .sdh file,
+        /// only on tracks <paramref name="mightKeep"/> says may stay (null: every track).
         /// </summary>
         public static async Task<List<TrackReading>> Run(FfmpegRunner runner, string videoPath, ProbeResult probe,
-            CancellationToken ct, bool filesOnly = false)
+            CancellationToken ct, bool filesOnly = false, Func<ProbeStream, bool> mightKeep = null)
         {
             var results = new List<TrackReading>();
             var tracks = TracksToRead(probe);
@@ -62,7 +63,7 @@ namespace Emby.Subremover.Core
                 for (var i = 0; i < tracks.Count; i++)
                 {
                     var text = result.Success && File.Exists(outputs[i]) ? File.ReadAllText(outputs[i]) : string.Empty;
-                    results.Add(Apply(tracks[i], text, result.Success ? null : $"ffmpeg couldn't read it (exit {result.ExitCode})", filesOnly));
+                    results.Add(Apply(tracks[i], text, result.Success ? null : $"ffmpeg couldn't read it (exit {result.ExitCode})", filesOnly, mightKeep));
                 }
             }
             finally
@@ -73,7 +74,8 @@ namespace Emby.Subremover.Core
         }
 
         /// <summary>What the text of one track says, applied to the track.</summary>
-        public static TrackReading Apply(ProbeStream stream, string text, string readProblem, bool filesOnly)
+        public static TrackReading Apply(ProbeStream stream, string text, string readProblem, bool filesOnly,
+            Func<ProbeStream, bool> mightKeep = null)
         {
             var reading = new TrackReading
             {
@@ -81,29 +83,36 @@ namespace Emby.Subremover.Core
                 Tag = stream.Language,
                 Guess = readProblem != null ? new LanguageGuess { Reason = readProblem } : LanguageGuesser.Guess(text)
             };
-            if (readProblem == null && !stream.IsHearingImpaired && SdhDetector.Looks(text, out var sdhReason))
+            ApplyLanguage(reading, filesOnly);
+
+            // After the language, so an "English" track that reads as Spanish counts as the Spanish it is.
+            if (readProblem == null && !stream.IsHearingImpaired && (mightKeep == null || mightKeep(stream))
+                && SdhDetector.Looks(text, out var sdhReason))
             {
                 stream.LooksHearingImpaired = true;
                 reading.Guess.SdhReason = sdhReason;
             }
+            return reading;
+        }
 
+        private static void ApplyLanguage(TrackReading reading, bool filesOnly)
+        {
             var language = reading.Guess.Language;
             if (language == null)
             {
                 // Can't say what it is, but clearly not what the tag says: it's treated as having no language.
-                if (reading.Tag == "und" || !LanguageGuesser.RulesOutTag(reading.Guess, reading.Tag)) return reading;
+                if (reading.Tag == "und" || !LanguageGuesser.RulesOutTag(reading.Guess, reading.Tag)) return;
                 language = "und";
                 reading.WrongTag = true;
             }
             else
             {
                 reading.WrongTag = reading.Tag != "und" && LanguageGuesser.ContradictsTag(reading.Guess, reading.Tag);
-                if (reading.Tag != "und" && !reading.WrongTag) return reading;
+                if (reading.Tag != "und" && !reading.WrongTag) return;
             }
 
-            if (filesOnly) stream.GuessedLanguage = language;
-            else SetGuessedLanguage(stream, language);
-            return reading;
+            if (filesOnly) reading.Stream.GuessedLanguage = language;
+            else SetGuessedLanguage(reading.Stream, language);
         }
 
         public static void SetGuessedLanguage(ProbeStream stream, string language)

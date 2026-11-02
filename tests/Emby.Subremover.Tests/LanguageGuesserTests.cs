@@ -286,6 +286,36 @@ public class LanguageGuesserTests
         Assert.EndsWith("My Movie (2020).eng.sdh.srt", plan.Extract[1].OutputPath);
     }
 
+    [Fact]
+    public void Tracks_that_are_removed_anyway_get_no_sdh_check()
+    {
+        var probe = Movie(Sub(2, "eng"), Sub(3, "chi"), Sub(4, "chi"));
+        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng") };
+        var sdhText = string.Concat(Enumerable.Range(1, 30).Select(i => $"{i}\n00:00:{i:00},000 --> 00:00:{i:00},900\n{(i % 3 == 0 ? "[door slams]" : "We have to go now, okay? Yeah.")}\n\n"));
+        var chineseSdhText = string.Concat(Enumerable.Range(1, 30).Select(i => $"{i}\n00:00:{i:00},000 --> 00:00:{i:00},900\n{(i % 3 == 0 ? "[关门声]" : "我们现在必须走了，好吗？好的。")}\n\n"));
+
+        var chinese = SubtitleLanguageGuessing.Apply(probe.streams[3], chineseSdhText, null, filesOnly: false, s => SubtitlePlanner.MightKeep(s, settings));
+        var english = SubtitleLanguageGuessing.Apply(probe.streams[1], sdhText + Srt(English), null, filesOnly: false, s => SubtitlePlanner.MightKeep(s, settings));
+
+        Assert.False(probe.streams[3].LooksHearingImpaired);
+        Assert.Null(chinese.Guess.SdhReason);
+        Assert.True(probe.streams[1].LooksHearingImpaired);
+        Assert.NotNull(english.Guess.SdhReason);
+    }
+
+    [Fact]
+    public void A_track_tagged_in_a_removed_language_that_reads_as_a_kept_one_still_gets_an_sdh_check()
+    {
+        var probe = Movie(Sub(2, "spa"), Sub(3, "spa"));
+        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng") };
+        var sdhText = string.Concat(Enumerable.Range(1, 30).Select(i => $"{i}\n00:00:{i:00},000 --> 00:00:{i:00},900\n{(i % 3 == 0 ? "[door slams]" : "We have to go now, okay? Yeah.")}\n\n"));
+
+        SubtitleLanguageGuessing.Apply(probe.streams[2], sdhText + Srt(English), null, filesOnly: false, s => SubtitlePlanner.MightKeep(s, settings));
+
+        Assert.Equal("eng", probe.streams[2].Language);
+        Assert.True(probe.streams[2].LooksHearingImpaired);
+    }
+
     // Lithuanian-like text: no word list knows it, but it clearly isn't English.
     private const string Unlisted = "Nežinau, ko tu iš manęs nori. Turime eiti dabar pat, gerai? Taip, manau, kad tai teisingas dalykas. Gali pasiimti mašiną ir susitiksime namuose. Jie nelauks mūsų visą naktį, todėl būk pasiruošęs. Aš esu čia ir jis taip pat yra su ja.";
 
