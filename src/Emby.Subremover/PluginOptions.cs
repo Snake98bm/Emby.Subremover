@@ -277,7 +277,8 @@ namespace Emby.Subremover
         private static readonly HashSet<string> DisplayOnly = new HashSet<string> { nameof(SelectedLog), nameof(LogText) };
 
         /// <summary>Every setting as "Name: value", in page order, for the top of each run log.</summary>
-        internal List<string> DescribeSettings() =>
+        /// <param name="libraryNames">Emby's library names by id, so the libraries read "Movies (12082)" rather than just the id.</param>
+        internal List<string> DescribeSettings(IDictionary<string, string> libraryNames = null) =>
             GetType().GetProperties()
                 .Where(p => p.CanWrite && !DisplayOnly.Contains(p.Name)
                             && (p.PropertyType == typeof(bool) || p.PropertyType == typeof(string) || p.PropertyType == typeof(int) || p.PropertyType.IsEnum)
@@ -286,12 +287,19 @@ namespace Emby.Subremover
                 {
                     var label = p.GetCustomAttribute<DisplayNameAttribute>()?.DisplayName;
                     var value = p.GetValue(this);
+                    if (p.Name == nameof(Libraries) && libraryNames != null) value = NameLibraries(Libraries, libraryNames);
                     var text = value is bool b ? (b ? "on" : "off")
                         : value is string s ? (s.Length == 0 ? "(empty)" : s)
                         : value?.ToString() ?? "(empty)";
                     return $"{(string.IsNullOrEmpty(label) ? p.Name : label)}: {text}";
                 })
                 .ToList();
+
+        /// <summary>"Movies (12082), TV Shows (12083)": the ids the setting holds, each with its name when Emby still has it.</summary>
+        internal static string NameLibraries(string ids, IDictionary<string, string> names) =>
+            string.Join(", ", (ids ?? string.Empty).Split(new[] { ',' }, System.StringSplitOptions.RemoveEmptyEntries)
+                .Select(id => id.Trim())
+                .Select(id => names.TryGetValue(id, out var name) ? $"{name} ({id})" : id));
 
         internal void ClearDisplayOnlyFields()
         {

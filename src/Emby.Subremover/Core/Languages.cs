@@ -110,11 +110,22 @@ namespace Emby.Subremover.Core
             return map;
         }
 
-        /// <summary>"deu", "de" and "GER" all become "ger"; unknown codes are just lower-cased; empty becomes "und".</summary>
+        // Written by some tools instead of leaving the language empty: they all mean "not set". Also no speech ("zxx"),
+        // several languages ("mul") and uncoded ("mis"), none of which is a language a viewer can pick.
+        private static readonly HashSet<string> NotSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "unk", "unknown", "undefined", "undetermined", "null", "none", "n/a", "xx", "xxx", "zxx", "mul", "mis"
+        };
+
+        /// <summary>
+        /// "deu", "de" and "GER" all become "ger"; unknown codes are just lower-cased; empty, and tags like "unknown" or
+        /// "null" that mean the same, become "und".
+        /// </summary>
         public static string Normalize(string code)
         {
             if (string.IsNullOrWhiteSpace(code)) return "und";
             var trimmed = code.Trim();
+            if (NotSet.Contains(trimmed)) return "und";
             // Some files use regional tags like "en-US" or "pt_BR".
             var primary = trimmed.Split('-', '_')[0];
             if (CanonicalByAnySpelling.TryGetValue(trimmed, out var canonical)) return canonical;
