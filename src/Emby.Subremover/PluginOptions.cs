@@ -240,37 +240,38 @@ namespace Emby.Subremover
         public CaptionItem HelpCaption { get; set; } = new CaptionItem("Help");
 
         // Help: each setting's name in bold with its explanation underneath, in page order. Emby has no way to add these
-        // from a list, so there's one entry per setting; a test checks there's one for every entry in SettingsHelp.
-        [DisplayName("")] public StatusItem Help01 { get; set; } = SettingsHelp.Item(0);
-        [DisplayName("")] public StatusItem Help02 { get; set; } = SettingsHelp.Item(1);
-        [DisplayName("")] public StatusItem Help03 { get; set; } = SettingsHelp.Item(2);
-        [DisplayName("")] public StatusItem Help04 { get; set; } = SettingsHelp.Item(3);
-        [DisplayName("")] public StatusItem Help05 { get; set; } = SettingsHelp.Item(4);
-        [DisplayName("")] public StatusItem Help06 { get; set; } = SettingsHelp.Item(5);
-        [DisplayName("")] public StatusItem Help07 { get; set; } = SettingsHelp.Item(6);
-        [DisplayName("")] public StatusItem Help08 { get; set; } = SettingsHelp.Item(7);
-        [DisplayName("")] public StatusItem Help09 { get; set; } = SettingsHelp.Item(8);
-        [DisplayName("")] public StatusItem Help10 { get; set; } = SettingsHelp.Item(9);
-        [DisplayName("")] public StatusItem Help11 { get; set; } = SettingsHelp.Item(10);
-        [DisplayName("")] public StatusItem Help12 { get; set; } = SettingsHelp.Item(11);
-        [DisplayName("")] public StatusItem Help13 { get; set; } = SettingsHelp.Item(12);
-        [DisplayName("")] public StatusItem Help14 { get; set; } = SettingsHelp.Item(13);
-        [DisplayName("")] public StatusItem Help15 { get; set; } = SettingsHelp.Item(14);
-        [DisplayName("")] public StatusItem Help16 { get; set; } = SettingsHelp.Item(15);
-        [DisplayName("")] public StatusItem Help17 { get; set; } = SettingsHelp.Item(16);
-        [DisplayName("")] public StatusItem Help18 { get; set; } = SettingsHelp.Item(17);
-        [DisplayName("")] public StatusItem Help19 { get; set; } = SettingsHelp.Item(18);
-        [DisplayName("")] public StatusItem Help20 { get; set; } = SettingsHelp.Item(19);
-        [DisplayName("")] public StatusItem Help21 { get; set; } = SettingsHelp.Item(20);
-        [DisplayName("")] public StatusItem Help22 { get; set; } = SettingsHelp.Item(21);
-        [DisplayName("")] public StatusItem Help23 { get; set; } = SettingsHelp.Item(22);
-        [DisplayName("")] public StatusItem Help24 { get; set; } = SettingsHelp.Item(23);
-        [DisplayName("")] public StatusItem Help25 { get; set; } = SettingsHelp.Item(24);
-        [DisplayName("")] public StatusItem Help26 { get; set; } = SettingsHelp.Item(25);
-        [DisplayName("")] public StatusItem Help27 { get; set; } = SettingsHelp.Item(26);
-        [DisplayName("")] public StatusItem Help28 { get; set; } = SettingsHelp.Item(27);
-        [DisplayName("")] public StatusItem Help29 { get; set; } = SettingsHelp.Item(28);
-        [DisplayName("")] public StatusItem Help30 { get; set; } = SettingsHelp.Item(29);
+        // from a list, so there's one entry per setting; a test checks there's one for every entry in SettingsHelp. Always read
+        // from SettingsHelp: the settings file keeps a copy of each, and an older version's copy would show stale or repeated help.
+        [DisplayName("")] public StatusItem Help01 { get => SettingsHelp.Item(0); set { } }
+        [DisplayName("")] public StatusItem Help02 { get => SettingsHelp.Item(1); set { } }
+        [DisplayName("")] public StatusItem Help03 { get => SettingsHelp.Item(2); set { } }
+        [DisplayName("")] public StatusItem Help04 { get => SettingsHelp.Item(3); set { } }
+        [DisplayName("")] public StatusItem Help05 { get => SettingsHelp.Item(4); set { } }
+        [DisplayName("")] public StatusItem Help06 { get => SettingsHelp.Item(5); set { } }
+        [DisplayName("")] public StatusItem Help07 { get => SettingsHelp.Item(6); set { } }
+        [DisplayName("")] public StatusItem Help08 { get => SettingsHelp.Item(7); set { } }
+        [DisplayName("")] public StatusItem Help09 { get => SettingsHelp.Item(8); set { } }
+        [DisplayName("")] public StatusItem Help10 { get => SettingsHelp.Item(9); set { } }
+        [DisplayName("")] public StatusItem Help11 { get => SettingsHelp.Item(10); set { } }
+        [DisplayName("")] public StatusItem Help12 { get => SettingsHelp.Item(11); set { } }
+        [DisplayName("")] public StatusItem Help13 { get => SettingsHelp.Item(12); set { } }
+        [DisplayName("")] public StatusItem Help14 { get => SettingsHelp.Item(13); set { } }
+        [DisplayName("")] public StatusItem Help15 { get => SettingsHelp.Item(14); set { } }
+        [DisplayName("")] public StatusItem Help16 { get => SettingsHelp.Item(15); set { } }
+        [DisplayName("")] public StatusItem Help17 { get => SettingsHelp.Item(16); set { } }
+        [DisplayName("")] public StatusItem Help18 { get => SettingsHelp.Item(17); set { } }
+        [DisplayName("")] public StatusItem Help19 { get => SettingsHelp.Item(18); set { } }
+        [DisplayName("")] public StatusItem Help20 { get => SettingsHelp.Item(19); set { } }
+        [DisplayName("")] public StatusItem Help21 { get => SettingsHelp.Item(20); set { } }
+        [DisplayName("")] public StatusItem Help22 { get => SettingsHelp.Item(21); set { } }
+        [DisplayName("")] public StatusItem Help23 { get => SettingsHelp.Item(22); set { } }
+        [DisplayName("")] public StatusItem Help24 { get => SettingsHelp.Item(23); set { } }
+        [DisplayName("")] public StatusItem Help25 { get => SettingsHelp.Item(24); set { } }
+        [DisplayName("")] public StatusItem Help26 { get => SettingsHelp.Item(25); set { } }
+        [DisplayName("")] public StatusItem Help27 { get => SettingsHelp.Item(26); set { } }
+        [DisplayName("")] public StatusItem Help28 { get => SettingsHelp.Item(27); set { } }
+        [DisplayName("")] public StatusItem Help29 { get => SettingsHelp.Item(28); set { } }
+        [DisplayName("")] public StatusItem Help30 { get => SettingsHelp.Item(29); set { } }
 
         /// <summary>Drops the lists and log text that are only filled in for display, so they never go into the settings file.</summary>
         // Filled in only to show the page; not settings.
