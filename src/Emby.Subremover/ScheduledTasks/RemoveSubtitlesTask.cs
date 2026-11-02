@@ -89,7 +89,7 @@ namespace Emby.Subremover.ScheduledTasks
                 newVideos == null ? "" : " for new videos added to the library",
                 options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
             // One pre-built string: values such as paths may contain braces.
-            _log.Info("SubRemover settings for this run:\n    " + string.Join("\n    ", options.DescribeSettings()));
+            _log.Info("SubRemover settings for this run:\n    " + string.Join("\n    ", options.DescribeSettings(LibraryNames())));
 
             var problem = Validate(options);
             if (problem != null)
@@ -200,6 +200,12 @@ namespace Emby.Subremover.ScheduledTasks
             if (o.BackupMode == BackupMode.BackupFolder && !Directory.Exists(o.BackupFolder)) return "backup folder '" + o.BackupFolder + "' does not exist";
             return null;
         }
+
+        private Dictionary<string, string> LibraryNames() =>
+            _libraryManager.GetVirtualFolders()
+                .Where(f => f.ItemId != null)
+                .GroupBy(f => f.ItemId)
+                .ToDictionary(g => g.Key, g => g.First().Name);
 
         /// <param name="onlyThese">New videos only: still limited to the libraries and path filter.</param>
         private List<BaseItem> FindVideos(PluginOptions options, ISet<string> onlyThese)

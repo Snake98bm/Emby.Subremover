@@ -38,6 +38,20 @@ public sealed class ReviewFixTests : IDisposable
         return path;
     }
 
+    [Fact]
+    public void A_video_audioremover_is_rewriting_right_now_is_left_alone()
+    {
+        var video = WriteFile("My Movie (2020).mkv", "video");
+        Assert.False(MediaProcessor.OtherToolIsWorkingOn(video));
+
+        var temp = WriteFile("My Movie (2020).mkv.audioremover-tmp", "half a remux");
+        Assert.True(MediaProcessor.OtherToolIsWorkingOn(video));
+
+        // Left behind by a crash: no longer written to, so it doesn't block the video for good.
+        File.SetLastWriteTimeUtc(temp, DateTime.UtcNow.AddHours(-1));
+        Assert.False(MediaProcessor.OtherToolIsWorkingOn(video));
+    }
+
     // ---- 1. extracted subtitles must be complete
 
     [Fact]

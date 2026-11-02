@@ -19,6 +19,10 @@ public class LanguageTests
     [InlineData("nob", "nor")]
     [InlineData("", "und")]
     [InlineData(null, "und")]
+    [InlineData("unknown", "und")]
+    [InlineData("null", "und")]
+    [InlineData("N/A", "und")]
+    [InlineData("zxx", "und")]
     [InlineData("qaa", "qaa")]
     public void Normalizes_every_spelling_to_one_code(string input, string expected)
     {

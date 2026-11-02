@@ -109,6 +109,13 @@ namespace Emby.Subremover
                 return Outcome.WouldChange;
             }
 
+            // AudioRemover rewrites videos the same way; two rewrites of one file at once would lose one of them.
+            if (OtherToolIsWorkingOn(path))
+            {
+                _log.Info("SubRemover: AudioRemover is changing {0} right now; leaving it for the next run", path);
+                return Outcome.NothingToDo;
+            }
+
             state.InProgress = path;
             store.Save(state);
             try
@@ -122,6 +129,16 @@ namespace Emby.Subremover
                 state.InProgress = null;
                 store.Save(state);
             }
+        }
+
+        /// <summary>
+        /// AudioRemover's temporary file next to the video, still being written: it's rewriting that video at this moment.
+        /// One left behind by a crash stops being written to, so it doesn't block the video for good.
+        /// </summary>
+        internal static bool OtherToolIsWorkingOn(string path, DateTime? nowUtc = null)
+        {
+            var temp = new FileInfo(path + ".audioremover-tmp");
+            return temp.Exists && (nowUtc ?? DateTime.UtcNow) - temp.LastWriteTimeUtc < TimeSpan.FromMinutes(10);
         }
 
         private async Task<Outcome> Apply(BaseItem item, string path, ProbeResult before, SubtitlePlan plan, PluginOptions options,

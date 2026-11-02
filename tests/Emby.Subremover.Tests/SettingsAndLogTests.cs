@@ -358,6 +358,14 @@ public sealed class SettingsAndLogTests : IDisposable
         Assert.Contains("Default subtitle language: (empty)", lines);
         Assert.Contains(lines, l => l.StartsWith("Backup of the original file: NextToOriginal"));
         Assert.DoesNotContain(lines, l => l.StartsWith("Run log") || l.Contains("Choices") || l.StartsWith("Videos that will be restored"));
+
+        // The libraries by name, keeping the id; one Emby no longer has stays as its id.
+        options.Libraries = "12082,12083, 99";
+        var named = options.DescribeSettings(new Dictionary<string, string> { ["12082"] = "Movies", ["12083"] = "TV Shows" });
+        Assert.Contains("Libraries to process: Movies (12082), TV Shows (12083), 99", named);
+        Assert.Contains("Libraries to process: 12082,12083, 99", options.DescribeSettings());
+        options.Libraries = "";
+        Assert.Contains("Libraries to process: (empty)", options.DescribeSettings(new Dictionary<string, string>()));
     }
 
     [Fact]
