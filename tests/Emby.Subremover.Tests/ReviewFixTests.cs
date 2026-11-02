@@ -245,6 +245,21 @@ public sealed class ReviewFixTests : IDisposable
         Assert.Equal("eng", loaded.KeepLanguages);
     }
 
+    [Fact]
+    public void Help_saved_by_an_older_version_is_never_shown()
+    {
+        // Older versions saved the help with the settings; with entries added since, a slot held another setting's help.
+        var logs = SettingsHelp.Item(SettingsHelp.Entries.Length - 1);
+        File.WriteAllText(Path.Combine(_dir, "Subremover.json"),
+            new TestJsonSerializer().SerializeToString(new { KeepLanguages = "eng", Help01 = logs, Help02 = logs }));
+
+        var loaded = new OptionsStore(_dir, "Subremover", new TestJsonSerializer(), new NullLogger()).Get();
+
+        Assert.Equal("eng", loaded.KeepLanguages);
+        Assert.Equal(SettingsHelp.Entries[0].Setting, loaded.Help01.Caption);
+        Assert.Equal(SettingsHelp.Entries[1].Setting, loaded.Help02.Caption);
+    }
+
     // ---- 6. leftovers from an interrupted run are cleaned up
 
     [Fact]
