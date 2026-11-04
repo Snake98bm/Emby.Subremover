@@ -136,6 +136,7 @@ namespace Emby.Subremover.ScheduledTasks
                     newVideos.Count, newVideos.Count == 1 ? "" : "s", items.Count);
             }
             _log.Info("SubRemover: {0} video files to check", items.Count);
+            FollowMovedVideos(history, items, options.DryRun);
 
             var counts = Enum.GetValues(typeof(Outcome)).Cast<Outcome>().ToDictionary(o => o, o => 0);
             var limit = LimitFor(options, newVideosOnly: newVideos != null);
@@ -259,6 +260,20 @@ namespace Emby.Subremover.ScheduledTasks
         {
             if (path.EndsWith("/") || path.EndsWith("\\")) return path;
             return path + (path.Contains("/") ? "/" : "\\");
+        }
+
+        // Videos moved on the share keep their "already done" record, backup, "restored" mark and the subtitle files made
+        // for them. In test mode only the preview copy changes.
+        private void FollowMovedVideos(SubremoverState state, IList<BaseItem> items, bool dryRun)
+        {
+            var moves = MovedVideos.Reconnect(state, items.Select(i => i.Path).ToList(), File.Exists, MovedVideos.StampOrNull);
+            if (moves.Count == 0) return;
+            if (!dryRun) _store.Save(state);
+            // One pre-built string: paths may contain braces.
+            _log.Info($"SubRemover: {moves.Count} video{(moves.Count == 1 ? "" : "s")} moved since an earlier run" +
+                      (dryRun ? " (test mode: a real run would note this)" : "") + "; their records and backups now follow them:" +
+                      string.Concat(moves.Take(10).Select(m => $"\n    {m.From} -> {m.To}")) +
+                      (moves.Count > 10 ? $"\n    and {moves.Count - 10} more" : ""));
         }
 
         private void CleanOldBackups(PluginOptions options, SubremoverState state)

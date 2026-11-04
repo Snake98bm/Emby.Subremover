@@ -214,50 +214,27 @@ public sealed class ReviewFixTests : IDisposable
     // ---- 5. display-only data never reaches the settings file
 
     [Fact]
-    public void Settings_page_copy_and_saves_never_write_display_data()
+    public void What_older_versions_saved_for_their_page_is_dropped_on_the_next_save()
     {
+        // Older versions saved log text, choice lists and help with the settings.
+        File.WriteAllText(Path.Combine(_dir, "Subremover.json"), new TestJsonSerializer().SerializeToString(new
+        {
+            KeepLanguages = "eng,spa",
+            LogText = "a very big log text",
+            LanguageChoices = new[] { new { Value = "eng", Name = "English (eng)" } },
+            Help01 = new { Caption = "Logs", StatusText = "old help" }
+        }));
+
         var store = new OptionsStore(_dir, "Subremover", new TestJsonSerializer(), new NullLogger());
-        var forPage = store.GetCopy();
-        forPage.LogText = "a very big log text";
-        forPage.LanguageChoices.Add(new Emby.Web.GenericEdit.Common.EditorSelectOption { Value = "eng", Name = "English (eng)" });
-        forPage.KeepLanguages = "eng,spa";
+        Assert.Equal("eng,spa", store.Get().KeepLanguages);
 
-        Assert.Null(store.Get().LogText);
-
-        store.Save(forPage);
+        store.Save(store.GetCopy());
 
         var json = File.ReadAllText(store.FilePath);
         Assert.DoesNotContain("a very big log text", json);
         Assert.DoesNotContain("English (eng)", json);
+        Assert.DoesNotContain("old help", json);
         Assert.Equal("eng,spa", new OptionsStore(_dir, "Subremover", new TestJsonSerializer(), new NullLogger()).Get().KeepLanguages);
-        Assert.Equal("a very big log text", forPage.LogText);
-    }
-
-    [Fact]
-    public void Display_data_already_in_an_old_settings_file_is_dropped_on_load()
-    {
-        var old = new PluginOptions { LogText = "leaked log", KeepLanguages = "eng" };
-        File.WriteAllText(Path.Combine(_dir, "Subremover.json"), new TestJsonSerializer().SerializeToString(old));
-
-        var loaded = new OptionsStore(_dir, "Subremover", new TestJsonSerializer(), new NullLogger()).Get();
-
-        Assert.Null(loaded.LogText);
-        Assert.Equal("eng", loaded.KeepLanguages);
-    }
-
-    [Fact]
-    public void Help_saved_by_an_older_version_is_never_shown()
-    {
-        // Older versions saved the help with the settings; with entries added since, a slot held another setting's help.
-        var logs = SettingsHelp.Item(SettingsHelp.Entries.Length - 1);
-        File.WriteAllText(Path.Combine(_dir, "Subremover.json"),
-            new TestJsonSerializer().SerializeToString(new { KeepLanguages = "eng", Help01 = logs, Help02 = logs }));
-
-        var loaded = new OptionsStore(_dir, "Subremover", new TestJsonSerializer(), new NullLogger()).Get();
-
-        Assert.Equal("eng", loaded.KeepLanguages);
-        Assert.Equal(SettingsHelp.Entries[0].Setting, loaded.Help01.Caption);
-        Assert.Equal(SettingsHelp.Entries[1].Setting, loaded.Help02.Caption);
     }
 
     // ---- 6. leftovers from an interrupted run are cleaned up

@@ -1,0 +1,90 @@
+<div id="subRemoverSettingsPage" data-role="page" class="page type-interior pluginConfigurationPage" data-controller="__plugin/SubRemoverSettingsJs">
+  <div data-role="content">
+    <div class="content-primary">
+      <style>
+        #subRemoverSettingsPage { --sr-line: rgba(128,128,128,.28); --sr-soft: rgba(128,128,128,.10); --sr-accent: #52b54b; --sr-warn: #e0a030; --sr-err: #dc4b4b; }
+        #subRemoverSettingsPage .sr-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1em; margin-bottom: .6em; }
+        #subRemoverSettingsPage .sr-head h2 { margin: 0; }
+        #subRemoverSettingsPage .sr-headbtns { display: flex; gap: .6em; flex-wrap: wrap; align-items: center; }
+        #subRemoverSettingsPage .sr-lead { opacity: .8; line-height: 1.5; margin: 0 0 1.2em; max-width: 60em; }
+        #subRemoverSettingsPage .sr-tabs { display: flex; flex-wrap: wrap; gap: .3em; border-bottom: 1px solid var(--sr-line); margin-bottom: 1.4em; }
+        #subRemoverSettingsPage .sr-tab { background: none; border: 0; border-bottom: 3px solid transparent; color: inherit; font: inherit; padding: .7em 1em; cursor: pointer; opacity: .75; }
+        #subRemoverSettingsPage .sr-tab:hover { opacity: 1; }
+        #subRemoverSettingsPage .sr-tab[aria-selected="true"] { opacity: 1; border-bottom-color: var(--sr-accent); font-weight: 600; }
+        #subRemoverSettingsPage .sr-panel { display: none; max-width: 62em; }
+        #subRemoverSettingsPage .sr-panel.sr-active { display: block; }
+        #subRemoverSettingsPage h3 { margin: 1.8em 0 .5em; font-size: 1.15em; }
+        #subRemoverSettingsPage .sr-panel > h3:first-child { margin-top: .2em; }
+        #subRemoverSettingsPage .sr-help { opacity: .75; font-size: .92em; line-height: 1.5; margin: .35em 0 1em; }
+        #subRemoverSettingsPage .sr-field { margin-bottom: 1.2em; }
+        #subRemoverSettingsPage .sr-field > label, #subRemoverSettingsPage .sr-label { display: block; font-weight: 600; margin-bottom: .35em; }
+        #subRemoverSettingsPage input[type=text], #subRemoverSettingsPage input[type=number], #subRemoverSettingsPage select, #subRemoverSettingsPage textarea {
+          width: 100%; box-sizing: border-box; padding: .6em .7em; border-radius: 6px; border: 1px solid var(--sr-line);
+          background: rgba(0,0,0,.18); color: inherit; font: inherit;
+        }
+        #subRemoverSettingsPage select option { color: #000; }
+        #subRemoverSettingsPage textarea { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .88em; line-height: 1.45; }
+        #subRemoverSettingsPage .sr-check { display: flex; gap: .6em; align-items: flex-start; margin: .7em 0 1em; cursor: pointer; line-height: 1.4; }
+        #subRemoverSettingsPage .sr-check input { margin-top: .2em; flex: none; width: 1.1em; height: 1.1em; accent-color: var(--sr-accent); }
+        #subRemoverSettingsPage .sr-indent { margin-left: 1.8em; }
+        #subRemoverSettingsPage .sr-muted { opacity: .65; }
+        #subRemoverSettingsPage .sr-btn { display: inline-flex; align-items: center; gap: .4em; padding: .6em 1.1em; border-radius: 6px; border: 1px solid var(--sr-line);
+          background: var(--sr-soft); color: inherit; font: inherit; cursor: pointer; text-decoration: none; }
+        #subRemoverSettingsPage .sr-btn:hover { background: rgba(128,128,128,.2); }
+        #subRemoverSettingsPage .sr-btn.sr-primary { background: var(--sr-accent); border-color: var(--sr-accent); color: #fff; font-weight: 600; }
+        #subRemoverSettingsPage .sr-btn.sr-danger { border-color: rgba(220,75,75,.6); }
+        #subRemoverSettingsPage .sr-btn.sr-danger:hover { background: rgba(220,75,75,.25); }
+        #subRemoverSettingsPage .sr-btn.sr-small { padding: .3em .65em; font-size: .9em; }
+        #subRemoverSettingsPage .sr-btn:disabled { opacity: .45; cursor: default; }
+        #subRemoverSettingsPage .sr-buttons { display: flex; flex-wrap: wrap; gap: .6em; margin: 1em 0; align-items: center; }
+        #subRemoverSettingsPage .sr-status { padding: .8em 1em; border-radius: 6px; margin: 1em 0; line-height: 1.5; white-space: pre-line; background: var(--sr-soft); border: 1px solid var(--sr-line); }
+        #subRemoverSettingsPage .sr-status:empty { display: none; }
+        #subRemoverSettingsPage .sr-status b { display: block; }
+        #subRemoverSettingsPage .sr-status.ok { background: rgba(82,181,75,.15); border-color: rgba(82,181,75,.5); }
+        #subRemoverSettingsPage .sr-status.warn { background: rgba(224,160,48,.15); border-color: rgba(224,160,48,.55); }
+        #subRemoverSettingsPage .sr-status.err { background: rgba(220,75,75,.13); border-color: rgba(220,75,75,.5); }
+        #subRemoverSettingsPage .sr-status.busy { border-color: rgba(56,140,230,.6); background: rgba(56,140,230,.12); }
+        #subRemoverSettingsPage .sr-chips { display: flex; flex-wrap: wrap; gap: .35em; max-height: 15em; overflow: auto; padding: .4em; border: 1px solid var(--sr-line); border-radius: 6px; }
+        #subRemoverSettingsPage .sr-chip { display: inline-flex; align-items: center; gap: .35em; padding: .25em .6em; border-radius: 999px; border: 1px solid var(--sr-line); cursor: pointer; font-size: .9em; user-select: none; }
+        #subRemoverSettingsPage .sr-chip input { accent-color: var(--sr-accent); }
+        #subRemoverSettingsPage .sr-chip.on { background: rgba(82,181,75,.22); border-color: rgba(82,181,75,.6); }
+        #subRemoverSettingsPage .sr-filter { margin-bottom: .4em; }
+        #subRemoverSettingsPage .sr-picked { font-size: .9em; margin: .35em 0 0; }
+        #subRemoverSettingsPage .sr-row { display: flex; gap: .6em; }
+        #subRemoverSettingsPage .sr-row > input { flex: 1; }
+        #subRemoverSettingsPage table.sr-table { width: 100%; border-collapse: collapse; font-size: .95em; }
+        #subRemoverSettingsPage table.sr-table th, #subRemoverSettingsPage table.sr-table td { text-align: left; padding: .5em; border-bottom: 1px solid var(--sr-line); vertical-align: top; }
+        #subRemoverSettingsPage table.sr-table th { font-weight: 600; opacity: .8; }
+        #subRemoverSettingsPage table.sr-table td:first-child { width: 2em; }
+        #subRemoverSettingsPage .sr-file { font-weight: 600; word-break: break-all; }
+        #subRemoverSettingsPage .sr-folder { font-size: .85em; opacity: .7; word-break: break-all; }
+        #subRemoverSettingsPage .sr-card { border: 1px solid var(--sr-line); border-radius: 8px; padding: 1em 1.2em; margin: 1em 0; background: rgba(128,128,128,.05); }
+        #subRemoverSettingsPage .sr-helpbox { margin-top: 2.4em; border-top: 1px solid var(--sr-line); padding-top: .4em; }
+        #subRemoverSettingsPage .sr-helpbox dt { font-weight: 600; margin-top: 1em; }
+        #subRemoverSettingsPage .sr-helpbox dd { margin: .25em 0 0; opacity: .78; line-height: 1.5; font-size: .93em; }
+        #subRemoverSettingsPage .sr-savebar { display: flex; gap: .8em; align-items: center; flex-wrap: wrap; padding: 1em 0; margin-top: 2em; border-top: 1px solid var(--sr-line); }
+      </style>
+
+      <div class="sr-head">
+        <h2 class="sectionTitle" id="srTitle">SubRemover</h2>
+        <div class="sr-headbtns">
+          <span id="srSaveStatusTop" class="sr-muted" role="status"></span>
+          <button type="button" class="sr-btn sr-primary" id="srSaveTop">Save</button>
+          <button type="button" class="sr-btn" id="srRunTop" title="Saves your settings and starts a run">▶ Run now</button>
+        </div>
+      </div>
+      <p class="sr-lead" id="srLead"></p>
+      <div class="sr-status err" id="srLoadError" role="alert"></div>
+
+      <div class="sr-tabs" role="tablist" id="srTabs"></div>
+
+      <form id="srForm" autocomplete="off">
+        <div id="srPanels"><p class="sr-muted">Loading…</p></div>
+        <div class="sr-savebar">
+          <button type="submit" class="sr-btn sr-primary" id="srSave">Save</button>
+          <span id="srSaveStatus" class="sr-muted" role="status"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
