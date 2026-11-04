@@ -70,11 +70,4 @@ public class RunStatusTests
         Assert.Contains("3 changed", RunStatus.Describe(TaskState.Idle, null, older, Summary()).StatusText);
     }
 
-    [Fact]
-    public void Status_line_sits_right_under_the_run_now_and_save_buttons()
-    {
-        var order = typeof(PluginOptions).GetProperties().Select(p => p.Name).ToList();
-        Assert.Equal(order.IndexOf(nameof(PluginOptions.RunNowButton)) + 1, order.IndexOf(nameof(PluginOptions.SaveButton)));
-        Assert.Equal(order.IndexOf(nameof(PluginOptions.SaveButton)) + 1, order.IndexOf(nameof(PluginOptions.RunStatus)));
-    }
 }

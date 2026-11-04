@@ -21,14 +21,13 @@ using MediaBrowser.Model.Tasks;
 
 namespace Emby.Subremover
 {
-    public class Plugin : BasePlugin, IHasUIPages, IHasThumbImage
+    public class Plugin : BasePlugin, IHasWebPages, IHasThumbImage
     {
         private readonly IApplicationHost _applicationHost;
         private readonly ILibraryManager _libraryManager;
         private readonly OptionsStore _store;
         private readonly StateStore _state;
         private readonly string _logDirectory;
-        private readonly List<IPluginUIPageController> _pages;
 
         public Plugin(IApplicationHost applicationHost, ILibraryManager libraryManager)
         {
@@ -41,11 +40,6 @@ namespace Emby.Subremover
                 applicationHost.Resolve<ILogManager>().GetLogger(Name));
             _logDirectory = applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath;
             _state = new StateStore(applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, applicationHost.Resolve<IJsonSerializer>());
-            _pages = new List<IPluginUIPageController>
-            {
-                SettingsPageController.ForPluginList(this, Name),
-                SettingsPageController.ForSidebar(this, Name, () => Options.ShowInSidebar)
-            };
             Instance = this;
         }
 
@@ -76,7 +70,29 @@ namespace Emby.Subremover
 
         public Stream GetThumbImage() => GetType().Assembly.GetManifestResourceStream("Emby.Subremover.thumb.png");
 
-        public IReadOnlyCollection<IPluginUIPageController> UIPageControllers => _pages.AsReadOnly();
+        internal const string PageName = "SubRemoverSettings";
+
+        /// <summary>
+        /// The settings page (Configuration/settings.html) and its script. It's the page under Plugins and, when
+        /// 'Show in the server sidebar menu' is on, also in the sidebar.
+        /// </summary>
+        public IEnumerable<PluginPageInfo> GetPages() => new[]
+        {
+            new PluginPageInfo
+            {
+                Name = PageName,
+                DisplayName = Name,
+                EmbeddedResourcePath = "Emby.Subremover.Configuration.settings.html",
+                IsMainConfigPage = true,
+                EnableInMainMenu = Options.ShowInSidebar,
+                MenuIcon = "subtitles_off"
+            },
+            new PluginPageInfo
+            {
+                Name = PageName + "Js",
+                EmbeddedResourcePath = "Emby.Subremover.Configuration.settings.js"
+            }
+        };
 
         public PluginOptions Options => _store.Get();
 
@@ -109,9 +125,6 @@ namespace Emby.Subremover
         // Never let a status problem stop the settings page from opening.
         public const string RestoreCaption = "Restore";
 
-        /// <summary>The restore list last shown on the settings page, waiting for its confirming click.</summary>
-        internal RestoreConfirmation RestoreConfirmation { get; } = new RestoreConfirmation();
-
         /// <summary>
         /// Every video with a backup, newest first so what was just changed is at the top, or why the Restore button won't.
         /// The path filter isn't used: the ticks on the list decide what's restored.
@@ -141,33 +154,10 @@ namespace Emby.Subremover
             _pendingRestore = chosen.Select(b => b.OriginalPath).ToList();
             _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RestoreBackupsTask>();
             return new StatusItem(RestoreCaption,
-                $"Restoring {chosen.Count} video{(chosen.Count == 1 ? "" : "s")}, started at {DateTime.Now:HH:mm}. Its log is under Log files below.", ItemStatus.InProgress);
+                $"Restoring {chosen.Count} video{(chosen.Count == 1 ? "" : "s")}, started at {DateTime.Now:HH:mm}. Its log is on the Logs tab.", ItemStatus.InProgress);
         }
 
         public const int RestoreListLimit = 200;
-
-        /// <summary>
-        /// One row per video: a box on the left showing whether it's selected, the file name, its folder and when the
-        /// backup was made underneath, and a toggle to select or unselect it.
-        /// </summary>
-        internal static GenericItemList RestoreItemsFor(IList<BackupEntry> backups, Func<int, bool> isSelected) =>
-            new GenericItemList(backups.Take(RestoreListLimit).Select((b, i) =>
-            {
-                var selected = isSelected(i);
-                return new GenericListItem
-                {
-                    IconMode = ItemListIconMode.NoIcons,
-                    PrimaryText = Path.GetFileName(b.OriginalPath),
-                    SecondaryText = Path.GetDirectoryName(b.OriginalPath) + " - backup made " + b.CreatedUtc.ToLocalTime().ToString("d MMM HH:mm") +
-                                    (File.Exists(b.BackupPath) ? "" : " - backup missing, will be skipped"),
-                    Toggle = new ToggleButtonItem
-                    {
-                        IsChecked = selected,
-                        Caption = "Restore",
-                        CommandId = SettingsPageView.RestoreToggleCommandPrefix + i.ToString(System.Globalization.CultureInfo.InvariantCulture)
-                    }
-                };
-            }));
 
         /// <summary>The listed videos that are selected, in list order.</summary>
         internal static List<BackupEntry> SelectedBackups(IList<BackupEntry> listed, IEnumerable<int> selection) =>
@@ -198,89 +188,28 @@ namespace Emby.Subremover
             }
         }
 
-        private StatusItem BackupCount()
+        internal string BackupCountText()
         {
             try
             {
                 var count = _state.Load().Backups.Count;
-                return new StatusItem(RestoreCaption, count == 1 ? "1 video has a backup." : $"{count} videos have a backup.", ItemStatus.None);
+                return count == 1 ? "1 video has a backup." : $"{count} videos have a backup.";
             }
             catch (Exception ex)
             {
-                return new StatusItem(RestoreCaption, "Backups unavailable: " + ex.Message, ItemStatus.Unknown);
+                return "Backups unavailable: " + ex.Message;
             }
         }
 
-        internal static void ApplyQuickSetup(PluginOptions options)
-        {
-            options.KeepLanguages = "eng";
-            options.KeepUndefined = true;
-        }
-
-        internal PluginOptions PrepareForDisplay(PluginOptions options)
-        {
-            options.LibraryChoices = _libraryManager.GetVirtualFolders()
+        /// <summary>The libraries that can be picked: everything but music, books and photos.</summary>
+        internal List<EditorSelectOption> LibraryChoices() =>
+            _libraryManager.GetVirtualFolders()
                 .Where(f => f.CollectionType != "music" && f.CollectionType != "books" && f.CollectionType != "photos")
                 .Select(f => new EditorSelectOption { Value = f.ItemId, Name = f.Name, IsEnabled = true })
                 .ToList();
-            options.LanguageChoices = LanguageChoicesFor(options.KeepLanguages);
-            options.DefaultLanguageChoices = DefaultLanguageChoicesFor(options.KeepLanguages);
-            if (options.DefaultLanguageChoices.All(c => c.Value != options.DefaultLanguage)) options.DefaultLanguage = string.Empty;
-            options.RunStatus = CurrentStatus();
-            options.RestoreStatus = BackupCount();
-            options.RestoreItems = new GenericItemList();
-            options.RestoreListShown = null;
-            options.RestoreButton = PluginOptions.NewRestoreButton();
-            options.SelectedLog = null;
-            ShowLog(options);
-            return options;
-        }
-
-        /// <summary>Fills the log list and shows the selected run log, or the newest when none is selected.</summary>
-        internal void ShowLog(PluginOptions options)
-        {
-            try
-            {
-                var files = RunLog.ListFiles(_logDirectory);
-                options.LogChoices = files.Select(f => new EditorSelectOption { Value = f, Name = f, IsEnabled = true }).ToList();
-                if (!files.Contains(options.SelectedLog)) options.SelectedLog = files.FirstOrDefault();
-                options.LogText = RunLog.ReadForDisplay(_logDirectory, options.SelectedLog);
-                options.LogLinks = LogLinksFor(options.SelectedLog, LogLinkKey.Current(DateTime.UtcNow));
-            }
-            catch (Exception ex)
-            {
-                options.LogText = "Couldn't read the run log: " + ex.Message;
-            }
-        }
 
         /// <summary>The secret in the log links on the settings page.</summary>
         internal LogLinkKey LogLinkKey { get; } = new LogLinkKey();
-
-        /// <summary>"Open this log in a new window" and "Download this log", for the log shown on the page.</summary>
-        internal static GenericItemList LogLinksFor(string logName, string key)
-        {
-            if (string.IsNullOrEmpty(logName)) return new GenericItemList();
-            return new GenericItemList(new[]
-            {
-                new GenericListItem
-                {
-                    PrimaryText = "Open this log in a new window",
-                    Icon = IconNames.open_in_new,
-                    IconMode = ItemListIconMode.SmallRegular,
-                    HyperLink = GetSubremoverLog.Link(logName, key, download: false),
-                    HyperLinkTargetExternal = true
-                },
-                new GenericListItem
-                {
-                    PrimaryText = "Download this log",
-                    SecondaryText = logName,
-                    Icon = IconNames.file_download,
-                    IconMode = ItemListIconMode.SmallRegular,
-                    HyperLink = GetSubremoverLog.Link(logName, key, download: true),
-                    HyperLinkTargetExternal = true
-                }
-            });
-        }
 
         // Only the kept languages: the default can't go to a subtitle that gets removed.
         internal static List<EditorSelectOption> DefaultLanguageChoicesFor(string keepLanguages)

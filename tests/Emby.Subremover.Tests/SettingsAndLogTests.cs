@@ -14,54 +14,6 @@ public sealed class SettingsAndLogTests : IDisposable
     public void Dispose() => Directory.Delete(_dir, true);
 
     [Fact]
-    public void Quick_setup_keeps_only_english_and_untagged_subtitles()
-    {
-        var options = new PluginOptions { KeepLanguages = "spa,fre", KeepUndefined = false };
-
-        Plugin.ApplyQuickSetup(options);
-
-        Assert.Equal("eng", options.KeepLanguages);
-        Assert.True(options.KeepUndefined);
-    }
-
-    [Fact]
-    public void Buttons_send_the_commands_the_page_handles_and_sit_where_planned()
-    {
-        var options = new PluginOptions();
-        Assert.Equal(SettingsPageView.RunNowCommand, options.RunNowButton.CommandId);
-        Assert.Equal(SettingsPageView.QuickSetupCommand, options.QuickSetupButton.CommandId);
-
-        var order = typeof(PluginOptions).GetProperties(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Select(p => p.Name).ToList();
-        Assert.Equal(nameof(PluginOptions.RunNowButton), order.First(n => n != nameof(PluginOptions.EditorTitle) && n != nameof(PluginOptions.EditorDescription)));
-        Assert.Equal(order.IndexOf(nameof(PluginOptions.KeepLanguages)) - 1, order.IndexOf(nameof(PluginOptions.QuickSetupButton)));
-    }
-
-    [Fact]
-    public void Settings_page_is_in_the_sidebar_and_the_plugin_list()
-    {
-        var show = true;
-        var settings = SettingsPageController.ForPluginList(null!, "SubRemover").PageInfo;
-        var sidebar = SettingsPageController.ForSidebar(null!, "SubRemover", () => show);
-
-        Assert.True(settings.IsMainConfigPage);
-        Assert.False(settings.EnableInMainMenu);
-
-        // The sidebar entry is its own page (the one at genericui?PageId=82033f:SubremoverMenu), spelled SubRemover.
-        var menu = sidebar.PageInfo;
-        Assert.Equal("SubremoverMenu", menu.Name);
-        Assert.Equal("SubRemover", menu.DisplayName);
-        Assert.False(menu.IsMainConfigPage);
-        Assert.True(menu.EnableInMainMenu);
-        Assert.Null(menu.MenuSection);
-        Assert.Equal("subtitles_off", menu.MenuIcon);
-        Assert.True(new PluginOptions().ShowInSidebar);
-
-        show = false;
-        Assert.False(sidebar.PageInfo.EnableInMainMenu);
-    }
-
-    [Fact]
     public void Page_title_shows_the_name_and_version()
     {
         // Local builds carry an alpha number ("0.6.9-alpha.3"); releases don't. The build metadata after '+' is left out.
@@ -137,27 +89,6 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
-    public void Display_only_fields_are_cleared_before_saving()
-    {
-        var options = new PluginOptions
-        {
-            LogText = "big log",
-            SelectedLog = "subremover-1.txt",
-            LogChoices = { new Emby.Web.GenericEdit.Common.EditorSelectOption { Value = "x" } },
-            LanguageChoices = { new Emby.Web.GenericEdit.Common.EditorSelectOption { Value = "eng" } },
-            KeepLanguages = "eng,spa"
-        };
-
-        options.ClearDisplayOnlyFields();
-
-        Assert.Null(options.LogText);
-        Assert.Null(options.SelectedLog);
-        Assert.Empty(options.LogChoices);
-        Assert.Empty(options.LanguageChoices);
-        Assert.Equal("eng,spa", options.KeepLanguages);
-    }
-
-    [Fact]
     public void Only_the_newest_run_logs_are_kept()
     {
         for (var i = 0; i < 40; i++) File.WriteAllText(Path.Combine(_dir, $"subremover-20260101-0000{i:00}.txt"), "old");
@@ -219,37 +150,6 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
-    public void Restore_list_shows_each_video_and_missing_backups()
-    {
-        var backup = Path.Combine(_dir, "My Movie (2020).mkv.subremover.bak");
-        File.WriteAllText(backup, "original");
-        var backups = new List<BackupEntry>
-        {
-            new() { OriginalPath = Path.Combine(_dir, "My Movie (2020).mkv"), BackupPath = backup },
-            new() { OriginalPath = Path.Combine(_dir, "Other (2021).mkv"), BackupPath = Path.Combine(_dir, "gone.bak") },
-        };
-
-        var items = Plugin.RestoreItemsFor(backups, i => i == 1);
-
-        Assert.Equal("My Movie (2020).mkv", items[0].PrimaryText);
-        Assert.StartsWith(_dir, items[0].SecondaryText);
-        Assert.EndsWith("backup missing, will be skipped", items[1].SecondaryText);
-        Assert.False(items[0].Toggle.IsChecked);
-        Assert.True(items[1].Toggle.IsChecked);
-        Assert.All(items, item => Assert.Equal("Restore", item.Toggle.Caption));
-        Assert.Equal(SettingsPageView.RestoreToggleCommandPrefix + "1", items[1].Toggle.CommandId);
-    }
-
-    [Fact]
-    public void Restore_list_is_cut_short_for_big_restores()
-    {
-        var backups = Enumerable.Range(0, Plugin.RestoreListLimit + 5).Select(i => new BackupEntry { OriginalPath = $"v{i}.mkv", BackupPath = $"v{i}.bak" }).ToList();
-
-        Assert.Equal(Plugin.RestoreListLimit, Plugin.RestoreItemsFor(backups, _ => false).Count);
-        Assert.Equal(Plugin.RestoreListLimit, Plugin.SelectedBackups(backups, Enumerable.Range(0, Plugin.RestoreListLimit + 5)).Count);
-    }
-
-    [Fact]
     public void Only_the_selected_videos_are_restored()
     {
         var backups = Enumerable.Range(0, 4).Select(i => new BackupEntry { OriginalPath = $"v{i}.mkv", BackupPath = $"v{i}.bak" }).ToList();
@@ -257,72 +157,6 @@ public sealed class SettingsAndLogTests : IDisposable
         Assert.Equal(new[] { "v0.mkv", "v3.mkv" }, Plugin.SelectedBackups(backups, new[] { 3, 0, 0, 9, -1 }).Select(b => b.OriginalPath));
         Assert.Empty(Plugin.SelectedBackups(backups, Array.Empty<int>()));
         Assert.Empty(Plugin.SelectedBackups(backups, null));
-    }
-
-    [Fact]
-    public void The_restore_list_remembers_what_is_selected_and_starts_empty()
-    {
-        var list = new RestoreConfirmation();
-        var now = DateTime.UtcNow;
-        list.Show("a|b|c", now);
-        Assert.Empty(list.Selected);
-
-        list.Toggle(1, now);
-        Assert.True(list.IsSelected(1));
-        list.Toggle(1, now);
-        Assert.False(list.IsSelected(1));
-
-        list.ToggleAll(3, now);
-        Assert.Equal(new[] { 0, 1, 2 }, list.Selected.OrderBy(i => i));
-        list.ToggleAll(3, now);
-        Assert.Empty(list.Selected);
-
-        list.Toggle(2, now);
-        list.Show("a|b|c", now);
-        Assert.Empty(list.Selected);
-    }
-
-    [Fact]
-    public void A_restore_list_only_confirms_the_very_next_click()
-    {
-        var confirmation = new RestoreConfirmation();
-        var now = DateTime.UtcNow;
-        Assert.Null(confirmation.Take(now));
-
-        confirmation.Show("My Movie (2020)|a.mkv", now);
-        Assert.Equal("My Movie (2020)|a.mkv", confirmation.Take(now));
-        Assert.Null(confirmation.Take(now));
-    }
-
-    [Fact]
-    public void Restore_button_asks_for_confirmation_after_the_list_is_shown()
-    {
-        Assert.Equal("Restore originals from backups…", PluginOptions.NewRestoreButton().Caption);
-        Assert.Equal("Yes, restore this video", PluginOptions.NewRestoreButton(1).Caption);
-        Assert.Equal("Yes, restore the selected videos", PluginOptions.NewRestoreButton(3).Caption);
-
-        // Listing and restoring are different commands, so a repeated "list" can never restore.
-        Assert.Equal(SettingsPageView.RestoreCommand, PluginOptions.NewRestoreButton().CommandId);
-        Assert.Equal(SettingsPageView.RestoreConfirmCommand, PluginOptions.NewRestoreButton(3).CommandId);
-        Assert.NotEqual(SettingsPageView.RestoreCommand, SettingsPageView.RestoreConfirmCommand);
-
-        // The list starts with nothing selected, so the one select button starts as "Select all".
-        Assert.Equal("Select all", new PluginOptions().RestoreSelectAllButton.Caption);
-        Assert.Equal("Unselect all", PluginOptions.NewSelectAllButton(allSelected: true).Caption);
-        Assert.Equal(SettingsPageView.RestoreSelectAllCommand, new PluginOptions().RestoreSelectAllButton.CommandId);
-    }
-
-    [Fact]
-    public void A_restore_list_expires_after_a_few_minutes()
-    {
-        var confirmation = new RestoreConfirmation();
-        var shown = new DateTime(2026, 10, 29, 12, 0, 0, DateTimeKind.Utc);
-
-        confirmation.Show("My Movie (2020)|a.mkv", shown);
-        Assert.Null(confirmation.Take(shown + RestoreConfirmation.ValidFor + TimeSpan.FromSeconds(1)));
-
-        confirmation.Show("My Movie (2020)|a.mkv", shown);
-        Assert.Equal("My Movie (2020)|a.mkv", confirmation.Take(shown.AddMinutes(1)));
     }
 
     [Theory]
@@ -383,18 +217,6 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
-    public void Help_shows_every_entry_in_order_with_its_title_and_explanation()
-    {
-        var shown = typeof(PluginOptions).GetProperties()
-            .Where(p => p.Name.StartsWith("Help") && p.PropertyType == typeof(StatusItem))
-            .Select(p => (StatusItem)p.GetValue(new PluginOptions())!)
-            .ToList();
-
-        Assert.Equal(SettingsHelp.Entries.Select(e => e.Setting), shown.Select(s => s.Caption));
-        Assert.StartsWith("When on, nothing is changed", shown[1].StatusText);
-    }
-
-    [Fact]
     public void Log_link_secret_lasts_a_day_and_only_matches_itself()
     {
         var secret = new LogLinkKey();
@@ -415,22 +237,6 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
-    public void Log_links_open_or_download_the_picked_log()
-    {
-        var links = Plugin.LogLinksFor("subremover-20261029-120000.txt", "abc123");
-
-        Assert.Equal(2, links.Count);
-        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123", links[0].HyperLink);
-        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123&Download=true", links[1].HyperLink);
-        Assert.All(links, l => Assert.True(l.HyperLinkTargetExternal));
-        // Each has its own icon, so they read as buttons.
-        Assert.All(links, l => Assert.NotNull(l.Icon));
-        Assert.NotEqual(links[0].Icon, links[1].Icon);
-        Assert.Empty(Plugin.LogLinksFor(null, "abc123"));
-        Assert.Contains("Name=a%20b%26c.txt", GetSubremoverLog.Link("a b&c.txt", "k", false));
-    }
-
-    [Fact]
     public void Whole_log_is_read_even_while_a_run_is_writing_it()
     {
         var path = Path.Combine(_dir, "subremover-20261029-120000.txt");
@@ -439,5 +245,160 @@ public sealed class SettingsAndLogTests : IDisposable
         {
             Assert.Equal("line 1\nline 2", RunLog.ReadAll(_dir, "subremover-20261029-120000.txt"));
         }
+    }
+
+    // ---- the settings page (Configuration/settings.html, drawn from SettingsLayout by settings.js)
+
+    private static bool IsSetting(PropertyInfo p) =>
+        (p.PropertyType == typeof(bool) || p.PropertyType == typeof(string) || p.PropertyType == typeof(int) || p.PropertyType.IsEnum)
+        && p.CanWrite
+        && p.GetCustomAttribute<System.ComponentModel.BrowsableAttribute>()?.Browsable != false
+        && !string.IsNullOrEmpty(p.GetCustomAttribute<System.ComponentModel.DisplayNameAttribute>()?.DisplayName);
+
+    [Fact]
+    public void Every_setting_is_on_the_page_exactly_once()
+    {
+        var settings = typeof(PluginOptions).GetProperties().Where(IsSetting).Select(p => p.Name).OrderBy(n => n).ToList();
+        var shown = SettingsLayout.FieldNames.ToList();
+
+        Assert.NotEmpty(settings);
+        Assert.Equal(shown.Count, shown.Distinct().Count());
+        Assert.Equal(settings, shown.OrderBy(n => n));
+    }
+
+    [Fact]
+    public void Page_has_its_tabs_in_order_with_the_run_restore_and_log_parts_where_planned()
+    {
+        var tabs = SettingsLayout.Page();
+
+        Assert.Equal(new[] { "Run", "Subtitles", "Subtitle files", "Backups", "Logs" }, tabs.Select(t => t.Name));
+        Assert.Equal(SettingsLayout.RunWidget, tabs[0].Entries[0].Text);
+        Assert.Equal(nameof(PluginOptions.DryRun), tabs[0].Entries[1].Field.Name);
+        Assert.Contains(tabs[1].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.QuickSetupWidget);
+        Assert.Contains(tabs[3].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.RestoreWidget);
+        Assert.Contains(tabs[4].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.LogsWidget);
+    }
+
+    [Fact]
+    public void Each_tab_ends_with_the_help_for_its_own_settings_in_order()
+    {
+        foreach (var tab in SettingsLayout.Page())
+        {
+            Assert.NotEmpty(tab.Help);
+            Assert.Equal(SettingsHelp.For(Enum.Parse<SettingsTabId>(tab.Id)).Select(e => e.Setting), tab.Help.Select(e => e.Setting));
+            foreach (var field in tab.Entries.Where(e => e.Kind == SettingsLayout.Field))
+                Assert.Contains(tab.Help, e => field.Field.Label.StartsWith(e.Setting));
+        }
+        Assert.StartsWith("When on, nothing is changed", SettingsHelp.For(SettingsTabId.Run)[1].Text);
+    }
+
+    [Fact]
+    public void Page_draws_each_setting_from_its_property()
+    {
+        var dryRun = SettingsLayout.Describe(nameof(PluginOptions.DryRun));
+        Assert.Equal(("bool", "Test mode (dry run)", "Nothing is changed; the log shows what would happen."), (dryRun.Kind, dryRun.Label, dryRun.Description));
+
+        Assert.Equal(("multiselect", "Libraries"), (SettingsLayout.Describe(nameof(PluginOptions.Libraries)).Kind, SettingsLayout.Describe(nameof(PluginOptions.Libraries)).Source));
+        Assert.Equal(("multiselect", "Languages"), (SettingsLayout.Describe(nameof(PluginOptions.KeepLanguages)).Kind, SettingsLayout.Describe(nameof(PluginOptions.KeepLanguages)).Source));
+        Assert.Equal(("select", "DefaultLanguage"), (SettingsLayout.Describe(nameof(PluginOptions.DefaultLanguage)).Kind, SettingsLayout.Describe(nameof(PluginOptions.DefaultLanguage)).Source));
+
+        var max = SettingsLayout.Describe(nameof(PluginOptions.MaxItemsPerRun));
+        Assert.Equal(("int", 0, 100000), (max.Kind, max.Min!.Value, max.Max!.Value));
+
+        var mode = SettingsLayout.Describe(nameof(PluginOptions.BackupMode));
+        Assert.Equal("select", mode.Kind);
+        Assert.Contains(mode.Options!, o => o.Value == "NextToOriginal" && o.Name == "Next to original");
+
+        var folder = SettingsLayout.Describe(nameof(PluginOptions.BackupFolder));
+        Assert.Equal("folder", folder.Kind);
+        Assert.Equal(("BackupMode", "IsEqual", "BackupFolder"), (folder.VisibleIf!.Field, folder.VisibleIf.Is, folder.VisibleIf.Value));
+
+        var guessOnly = SettingsLayout.Describe(nameof(PluginOptions.GuessForFilesOnly));
+        Assert.Equal(("GuessLanguages", "IsTrue"), (guessOnly.VisibleIf!.Field, guessOnly.VisibleIf.Is));
+        Assert.Null(dryRun.VisibleIf);
+    }
+
+    [Fact]
+    public void Saving_reads_each_value_from_its_text_and_ignores_names_the_page_does_not_show()
+    {
+        var options = new PluginOptions();
+        var problem = SettingsLayout.Apply(options, new Dictionary<string, string>
+        {
+            [nameof(PluginOptions.DryRun)] = "false",
+            [nameof(PluginOptions.MaxItemsPerRun)] = " 3 ",
+            [nameof(PluginOptions.BackupMode)] = "None",
+            [nameof(PluginOptions.KeepLanguages)] = "eng,spa",
+            [nameof(PluginOptions.DefaultLanguage)] = "spa",
+            [nameof(PluginOptions.OnlyPathContains)] = "  My Movie (2020)  ",
+            ["Bogus"] = "x"
+        });
+
+        Assert.Null(problem);
+        Assert.False(options.DryRun);
+        Assert.Equal(3, options.MaxItemsPerRun);
+        Assert.Equal(BackupMode.None, options.BackupMode);
+        Assert.Equal("spa", options.DefaultLanguage);
+        Assert.Equal("My Movie (2020)", options.OnlyPathContains);
+
+        // What the page gets back is what it sends.
+        var copy = new PluginOptions();
+        Assert.Null(SettingsLayout.Apply(copy, SettingsLayout.Values(options)));
+        Assert.Equal(options.DescribeSettings(), copy.DescribeSettings());
+        Assert.Equal("false", SettingsLayout.Values(options)[nameof(PluginOptions.DryRun)]);
+    }
+
+    [Theory]
+    [InlineData(nameof(PluginOptions.MaxItemsPerRun), "-1", "'Max videos to change per run' must be between 0 and 100000.")]
+    [InlineData(nameof(PluginOptions.MaxItemsPerRun), "lots", "'Max videos to change per run' must be a whole number.")]
+    [InlineData(nameof(PluginOptions.DryRun), "maybe", "'Test mode (dry run)' must be on or off.")]
+    [InlineData(nameof(PluginOptions.BackupMode), "Sideways", "'Backup of the original file' has no choice 'Sideways'.")]
+    public void A_bad_value_is_refused_by_the_setting_name(string name, string value, string expected)
+    {
+        var options = new PluginOptions();
+        Assert.Equal(expected, SettingsLayout.Apply(options, new Dictionary<string, string> { [name] = value }));
+        Assert.Equal(new PluginOptions().DescribeSettings(), options.DescribeSettings());
+    }
+
+    [Fact]
+    public void A_default_language_that_is_no_longer_kept_goes_back_to_automatic()
+    {
+        var options = new PluginOptions { KeepLanguages = "eng,spa", DefaultLanguage = "spa" };
+        SettingsLayout.Apply(options, new Dictionary<string, string> { [nameof(PluginOptions.KeepLanguages)] = "eng" });
+        Assert.Equal("", options.DefaultLanguage);
+    }
+
+    [Fact]
+    public void Settings_page_and_its_script_are_in_the_plugin()
+    {
+        var resources = typeof(Plugin).Assembly.GetManifestResourceNames();
+        Assert.Contains("Emby.Subremover.Configuration.settings.html", resources);
+        Assert.Contains("Emby.Subremover.Configuration.settings.js", resources);
+
+        // The page names its script by the script's page name.
+        using var html = new StreamReader(typeof(Plugin).Assembly.GetManifestResourceStream("Emby.Subremover.Configuration.settings.html")!);
+        Assert.Contains("data-controller=\"__plugin/" + Plugin.PageName + "Js\"", html.ReadToEnd());
+        Assert.True(new PluginOptions().ShowInSidebar);
+    }
+
+    [Fact]
+    public void Only_the_listed_backups_are_restored_and_only_from_the_list_that_was_shown()
+    {
+        var backups = Enumerable.Range(0, Plugin.RestoreListLimit + 5).Select(i => new BackupEntry { OriginalPath = $"v{i}.mkv", BackupPath = $"v{i}.bak" }).ToList();
+        Assert.Equal(Plugin.RestoreListLimit, Plugin.SelectedBackups(backups, Enumerable.Range(0, Plugin.RestoreListLimit + 5)).Count);
+
+        Assert.Equal(new[] { 0, 3, 5 }, SettingsApi.ParseIndexes("0, 3,x,-2,5"));
+        Assert.Empty(SettingsApi.ParseIndexes(null));
+
+        var key = SettingsApi.RestoreKey(backups);
+        Assert.Equal(key, SettingsApi.RestoreKey(backups.ToList()));
+        Assert.NotEqual(key, SettingsApi.RestoreKey(backups.Skip(1)));
+    }
+
+    [Fact]
+    public void Log_links_open_or_download_the_picked_log()
+    {
+        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123", GetSubremoverLog.Link("subremover-20261029-120000.txt", "abc123", false));
+        Assert.Equal("/emby/SubRemover/Log?Name=subremover-20261029-120000.txt&Key=abc123&Download=true", GetSubremoverLog.Link("subremover-20261029-120000.txt", "abc123", true));
+        Assert.Contains("Name=a%20b%26c.txt", GetSubremoverLog.Link("a b&c.txt", "k", false));
     }
 }

@@ -11,8 +11,8 @@ namespace Emby.Subremover
     /// so settings saved by earlier versions carry over.
     /// </summary>
     /// <remarks>
-    /// The tasks share one cached copy; the settings page always gets its own copy, because it fills in
-    /// display-only data (lists, log text) that must never reach the settings file.
+    /// The tasks share one cached copy; the settings page always edits its own copy. Anything an older version saved
+    /// for its page (lists, log text, help) isn't a setting any more and is dropped on the next save.
     /// </remarks>
     public class OptionsStore
     {
@@ -44,7 +44,6 @@ namespace Emby.Subremover
                         {
                             _options = (PluginOptions)new PluginOptions().DeserializeFromJsonStream(stream, _json);
                         }
-                        _options.ClearDisplayOnlyFields();
                     }
                 }
                 catch (Exception ex)
@@ -68,7 +67,6 @@ namespace Emby.Subremover
             lock (_lock)
             {
                 var clean = Clone(options);
-                clean.ClearDisplayOnlyFields();
                 Directory.CreateDirectory(Path.GetDirectoryName(FilePath));
                 using (var stream = new FileStream(FilePath, FileMode.Create, FileAccess.Write))
                 {
