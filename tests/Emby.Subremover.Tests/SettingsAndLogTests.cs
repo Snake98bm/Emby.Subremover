@@ -280,6 +280,47 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
+    public void The_ocr_model_help_names_the_servers_tesseract()
+    {
+        var engine = OcrEngineInfo.Format("5.2.0", "5.1-emby_2023_06_25_p6", "built with gcc 12.2.0");
+        Assert.Equal("Tesseract 5.2.0, built into Emby's ffmpeg 5.1-emby_2023_06_25_p6 (built with gcc 12.2.0)", engine);
+
+        var help = SettingsLayout.Page(engine).SelectMany(t => t.Help).Single(h => h.Setting == SettingsHelp.OcrModelSetting);
+        Assert.EndsWith("This server's OCR: " + engine + ".", help.Text);
+        Assert.DoesNotContain("This server's OCR", SettingsLayout.Page().SelectMany(t => t.Help).Single(h => h.Setting == SettingsHelp.OcrModelSetting).Text);
+    }
+
+    [Fact]
+    public void Ffmpegs_version_lines_are_read()
+    {
+        var (version, compiler) = OcrEngineInfo.ParseVersion(
+            "ffmpeg version 5.1-emby_2023_06_25_p6 Copyright (c) 2000-2022 the FFmpeg developers\r\nbuilt with gcc 12.2.0 (Rev10, Built by MSYS2 project)\r\nconfiguration: --enable-libtesseract\r\n");
+        Assert.Equal("5.1-emby_2023_06_25_p6", version);
+        Assert.Equal("built with gcc 12.2.0", compiler);
+    }
+
+    [Fact]
+    public void The_tesseract_version_is_read_from_embys_ffmpeg()
+    {
+        var ffmpeg = FindEmbyFfmpeg();
+        if (ffmpeg == null) Assert.Skip("Emby's ffmpeg not found in tools/ffmpeg");
+        Assert.Matches(@"^Tesseract \d+\.\d+\.\d+, built into Emby's ffmpeg \S+", OcrEngineInfo.Describe(ffmpeg));
+    }
+
+    private static string FindEmbyFfmpeg()
+    {
+        var exe = OperatingSystem.IsWindows() ? "ffmpeg.exe" : "ffmpeg";
+        var env = Environment.GetEnvironmentVariable("SUBREMOVER_FFMPEG_DIR");
+        if (!string.IsNullOrEmpty(env) && File.Exists(Path.Combine(env, exe))) return Path.Combine(env, exe);
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir != null; dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "tools", "ffmpeg", exe);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    [Fact]
     public void Each_tab_ends_with_the_help_for_its_own_settings_in_order()
     {
         foreach (var tab in SettingsLayout.Page())

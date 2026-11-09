@@ -228,7 +228,8 @@ namespace Emby.Subremover
             return null;
         }
 
-        internal static List<TabDto> Page() => Tabs.Select(t => new TabDto
+        /// <param name="ocrEngine">Which Tesseract the server's ffmpeg has, added to the OCR model help; null leaves it out.</param>
+        internal static List<TabDto> Page(string ocrEngine = null) => Tabs.Select(t => new TabDto
         {
             Id = t.Id.ToString(),
             Name = t.Name,
@@ -238,7 +239,13 @@ namespace Emby.Subremover
                 Text = e.Kind == Field ? null : e.Value,
                 Field = e.Kind == Field ? Describe(e.Value) : null
             }).ToList(),
-            Help = SettingsHelp.For(t.Id).Select(h => new HelpDto { Setting = h.Setting, Text = h.Text }).ToList()
+            Help = SettingsHelp.For(t.Id).Select(h => new HelpDto
+            {
+                Setting = h.Setting,
+                Text = h.Setting == SettingsHelp.OcrModelSetting && ocrEngine != null
+                    ? h.Text + " This server's OCR: " + ocrEngine + "."
+                    : h.Text
+            }).ToList()
         }).ToList();
     }
 
