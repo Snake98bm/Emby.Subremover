@@ -96,11 +96,11 @@ namespace Emby.Subremover.Core
 
         // graphicsub2text exists only in Emby's ffmpeg build. The tessdata path is relative to the process working
         // directory because a Windows drive colon would need double escaping inside a filter graph.
-        public static IList<string> Ocr(string input, int streamIndex, string tesseractLanguage, string output) => new List<string>
+        public static IList<string> Ocr(string input, int streamIndex, string tesseractLanguage, string output, string tessdataFolder = "tessdata") => new List<string>
         {
             "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", input,
             "-filter_complex",
-            $"[0:{streamIndex}]graphicsub2text=tessdata_path=tessdata/:language={tesseractLanguage}:ocr_mode=lstm:recognize=italic[ocr]",
+            $"[0:{streamIndex}]graphicsub2text=tessdata_path={tessdataFolder}/:language={tesseractLanguage}:ocr_mode=lstm:recognize=italic[ocr]",
             "-map", "[ocr]", "-c:s", "srt", "-f", "srt", output
         };
 

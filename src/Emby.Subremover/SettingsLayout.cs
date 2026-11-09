@@ -94,7 +94,8 @@ namespace Emby.Subremover
                     H("OCR (experimental)"),
                     F(nameof(PluginOptions.OcrPictureSubtitles)),
                     F(nameof(PluginOptions.OcrExistingFile)),
-                    F(nameof(PluginOptions.OfferOcrInSubtitleSearch))
+                    F(nameof(PluginOptions.OfferOcrInSubtitleSearch)),
+                    F(nameof(PluginOptions.OcrModel))
                 }
             },
             new TabLayout

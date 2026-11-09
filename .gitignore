@@ -22,6 +22,7 @@ Thumbs.db
 
 # Tesseract language data for local OCR tests
 tools/tessdata/
+tools/tessdata_best/
 
 # Real video clips for local testing
 tools/samples/

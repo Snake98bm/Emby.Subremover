@@ -91,6 +91,10 @@ namespace Emby.Subremover
                 "The language data (about 4 MB per language) is downloaded the first time. OCR can misread words."),
             (SettingsTabId.SubtitleFiles, "If the OCR subtitle file already exists",
                 "Keep existing leaves an OCR file from an earlier run alone. Replace makes it again."),
+            (SettingsTabId.SubtitleFiles, "OCR model",
+                "Fast uses Tesseract's fast model (about 4 MB per language). Accurate uses its best model (about 15 MB per language, a " +
+                "little slower); it reads some words better and others worse. Both runs the two at the same time on two CPU cores and, " +
+                "for each subtitle, keeps the reading with fewer misread words. Used by the OCR setting above and by the subtitle search."),
             (SettingsTabId.SubtitleFiles, "Offer OCR in Emby's subtitle search",
                 "Adds 'OCR of the built-in subtitles' to the results when you search for subtitles in Emby (Search for Subtitles in the " +
                 "player, or a video's ... menu > Edit subtitles > Search). Picking it reads that picture track with OCR, which takes a few " +
