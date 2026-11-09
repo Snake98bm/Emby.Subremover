@@ -6,6 +6,10 @@
       <circle cx="6.5" cy="6.5" r="0.7" fill="#B5B5B5"/>
       <rect x="4" y="1" width="3" height="0.8" fill="#C4C4C4"/>
     </pattern>
+    <linearGradient id="scanGlow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E24B4A" stop-opacity="0"/>
+      <stop offset="1" stop-color="#E24B4A" stop-opacity="0.35"/>
+    </linearGradient>
   </defs>
   <rect width="600" height="338" fill="#3A3A3A"/>
 
@@ -38,7 +42,78 @@
   </g>
 
   <!-- title -->
-  <text x="212" y="160" font-family="Impact, 'Arial Black', sans-serif" font-size="66" fill="url(#grit)" stroke="#1A1A1A" stroke-width="1">SUB-REMOVER</text>
-  <rect x="214" y="180" width="356" height="3" fill="#F0F0F0"/>
-  <text x="392" y="222" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="21" letter-spacing="1" fill="#F0F0F0">REMOVE UNWANTED SUBTITLES</text>
+  <text x="212" y="132" font-family="Impact, 'Arial Black', sans-serif" font-size="66" fill="url(#grit)" stroke="#1A1A1A" stroke-width="1">SUB-REMOVER</text>
+  <rect x="214" y="150" width="356" height="3" fill="#F0F0F0"/>
+  <text x="392" y="188" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-size="21" letter-spacing="1" fill="#F0F0F0">REMOVE UNWANTED SUBTITLES</text>
+
+  <!-- OCR: picture subtitle in a scan frame -> text -->
+  <g fill="none" stroke="#F0F0F0" stroke-width="2.5" stroke-linecap="round">
+    <path d="M244 218 v-6 h8"/><path d="M336 218 v-6 h-8"/>
+    <path d="M244 254 v6 h-0 h8"/><path d="M336 254 v6 h-8"/>
+  </g>
+  <g fill="#F0F0F0">
+    <rect x="260.6" y="223.4" width="3.3" height="3.3"/>
+    <rect x="264.2" y="223.4" width="3.3" height="3.3"/>
+    <rect x="267.8" y="223.4" width="3.3" height="3.3"/>
+    <rect x="257.0" y="227.0" width="3.3" height="3.3"/>
+    <rect x="271.4" y="227.0" width="3.3" height="3.3"/>
+    <rect x="257.0" y="230.6" width="3.3" height="3.3"/>
+    <rect x="271.4" y="230.6" width="3.3" height="3.3"/>
+    <rect x="257.0" y="234.2" width="3.3" height="3.3"/>
+    <rect x="260.6" y="234.2" width="3.3" height="3.3"/>
+    <rect x="264.2" y="234.2" width="3.3" height="3.3"/>
+    <rect x="267.8" y="234.2" width="3.3" height="3.3"/>
+    <rect x="271.4" y="234.2" width="3.3" height="3.3"/>
+    <rect x="257.0" y="237.8" width="3.3" height="3.3"/>
+    <rect x="271.4" y="237.8" width="3.3" height="3.3"/>
+    <rect x="257.0" y="241.4" width="3.3" height="3.3"/>
+    <rect x="271.4" y="241.4" width="3.3" height="3.3"/>
+    <rect x="257.0" y="245.0" width="3.3" height="3.3"/>
+    <rect x="271.4" y="245.0" width="3.3" height="3.3"/>
+    <rect x="281.0" y="223.4" width="3.3" height="3.3"/>
+    <rect x="284.6" y="223.4" width="3.3" height="3.3"/>
+    <rect x="288.2" y="223.4" width="3.3" height="3.3"/>
+    <rect x="291.8" y="223.4" width="3.3" height="3.3"/>
+    <rect x="281.0" y="227.0" width="3.3" height="3.3"/>
+    <rect x="295.4" y="227.0" width="3.3" height="3.3"/>
+    <rect x="281.0" y="230.6" width="3.3" height="3.3"/>
+    <rect x="295.4" y="230.6" width="3.3" height="3.3"/>
+    <rect x="281.0" y="234.2" width="3.3" height="3.3"/>
+    <rect x="284.6" y="234.2" width="3.3" height="3.3"/>
+    <rect x="288.2" y="234.2" width="3.3" height="3.3"/>
+    <rect x="291.8" y="234.2" width="3.3" height="3.3"/>
+    <rect x="281.0" y="237.8" width="3.3" height="3.3"/>
+    <rect x="295.4" y="237.8" width="3.3" height="3.3"/>
+    <rect x="281.0" y="241.4" width="3.3" height="3.3"/>
+    <rect x="295.4" y="241.4" width="3.3" height="3.3"/>
+    <rect x="281.0" y="245.0" width="3.3" height="3.3"/>
+    <rect x="284.6" y="245.0" width="3.3" height="3.3"/>
+    <rect x="288.2" y="245.0" width="3.3" height="3.3"/>
+    <rect x="291.8" y="245.0" width="3.3" height="3.3"/>
+    <rect x="308.6" y="223.4" width="3.3" height="3.3"/>
+    <rect x="312.2" y="223.4" width="3.3" height="3.3"/>
+    <rect x="315.8" y="223.4" width="3.3" height="3.3"/>
+    <rect x="305.0" y="227.0" width="3.3" height="3.3"/>
+    <rect x="319.4" y="227.0" width="3.3" height="3.3"/>
+    <rect x="305.0" y="230.6" width="3.3" height="3.3"/>
+    <rect x="305.0" y="234.2" width="3.3" height="3.3"/>
+    <rect x="305.0" y="237.8" width="3.3" height="3.3"/>
+    <rect x="305.0" y="241.4" width="3.3" height="3.3"/>
+    <rect x="319.4" y="241.4" width="3.3" height="3.3"/>
+    <rect x="308.6" y="245.0" width="3.3" height="3.3"/>
+    <rect x="312.2" y="245.0" width="3.3" height="3.3"/>
+    <rect x="315.8" y="245.0" width="3.3" height="3.3"/>
+  </g>
+  <rect x="248" y="226" width="84" height="12" fill="url(#scanGlow)"/>
+  <line x1="246" y1="238" x2="334" y2="238" stroke="#E24B4A" stroke-width="2"/>
+
+  <g fill="none" stroke="#F0F0F0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M352 236 h30"/><path d="M374 228 l8 8 l-8 8"/>
+  </g>
+
+  <rect x="398" y="216" width="80" height="40" rx="6" fill="#2A2A2A" stroke="#F0F0F0" stroke-width="1.5"/>
+  <text x="438" y="245" text-anchor="middle" font-family="'Segoe UI', Arial, sans-serif" font-weight="600" font-size="24" fill="#F0F0F0">ABC</text>
+  <text x="492" y="233" font-family="Impact, 'Arial Black', sans-serif" font-size="22" fill="#F0F0F0">OCR</text>
+  <text x="492" y="250" font-family="'Segoe UI', Arial, sans-serif" font-size="11" letter-spacing="0.5" fill="#BDBDBD">PICTURE SUBS</text>
+  <text x="492" y="263" font-family="'Segoe UI', Arial, sans-serif" font-size="11" letter-spacing="0.5" fill="#BDBDBD">TO TEXT</text>
 </svg>

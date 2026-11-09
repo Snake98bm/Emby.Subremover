@@ -155,6 +155,7 @@ namespace Emby.Subremover
             var ocrFailed = false;
             foreach (var job in plan.Ocr)
             {
+                job.Models = options.OcrModel;
                 var problem = await SubtitleOcr.Run(_runner, _tessdata, path, job, ct).ConfigureAwait(false);
                 if (problem == null)
                 {

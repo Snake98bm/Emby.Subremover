@@ -9,6 +9,10 @@ namespace Emby.Subremover
     /// </summary>
     internal static class SettingsHelp
     {
+        // The settings page adds which Tesseract the server has to this entry (SettingsLayout.Page).
+        internal const SettingsTabId OcrModelTab = SettingsTabId.SubtitleFiles;
+        internal const string OcrModelSetting = "OCR model";
+
         internal static readonly (SettingsTabId Tab, string Setting, string Text)[] Entries =
         {
             (SettingsTabId.Run, "Run now",
@@ -91,6 +95,12 @@ namespace Emby.Subremover
                 "The language data (about 4 MB per language) is downloaded the first time. OCR can misread words."),
             (SettingsTabId.SubtitleFiles, "If the OCR subtitle file already exists",
                 "Keep existing leaves an OCR file from an earlier run alone. Replace makes it again."),
+            (OcrModelTab, OcrModelSetting,
+                "Fast uses Tesseract's fast model (tessdata_fast, about 4 MB per language). Accurate uses its best model (tessdata_best, " +
+                "about 15 MB per language, a little slower); it reads some words better and others worse. Both runs the two at the same " +
+                "time on two CPU cores and, for each subtitle, keeps the reading with fewer misread words. The models are Tesseract's " +
+                "LSTM models from github.com/tesseract-ocr, downloaded the first time they're needed; Tesseract itself is built into " +
+                "Emby's ffmpeg. Used by the OCR setting above and by the subtitle search."),
             (SettingsTabId.SubtitleFiles, "Offer OCR in Emby's subtitle search",
                 "Adds 'OCR of the built-in subtitles' to the results when you search for subtitles in Emby (Search for Subtitles in the " +
                 "player, or a video's ... menu > Edit subtitles > Search). Picking it reads that picture track with OCR, which takes a few " +

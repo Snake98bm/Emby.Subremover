@@ -98,6 +98,10 @@ namespace Emby.Subremover
         [Description("Adds an OCR choice to Emby's Search for Subtitles.")]
         public bool OfferOcrInSubtitleSearch { get; set; }
 
+        [DisplayName("OCR model")]
+        [Description("Both reads every subtitle with both models at once and keeps the better reading.")]
+        public OcrModels OcrModel { get; set; } = OcrModels.Both;
+
         [DisplayName("If the OCR subtitle file already exists")]
         [VisibleCondition(nameof(OcrPictureSubtitles), SimpleCondition.IsTrue)]
         public ExistingOcrFile OcrExistingFile { get; set; } = ExistingOcrFile.KeepExisting;

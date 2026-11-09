@@ -7,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Net;
 using MediaBrowser.Model.Serialization;
 using MediaBrowser.Model.Services;
@@ -127,11 +128,20 @@ namespace Emby.Subremover
     {
         private readonly IJsonSerializer _json;
         private readonly string _logDirectory;
+        private readonly IFfmpegManager _ffmpeg;
 
-        public SettingsApi(IJsonSerializer json, IApplicationPaths appPaths)
+        public SettingsApi(IJsonSerializer json, IApplicationPaths appPaths, IFfmpegManager ffmpeg)
         {
             _json = json;
             _logDirectory = appPaths.LogDirectoryPath;
+            _ffmpeg = ffmpeg;
+        }
+
+        // "Tesseract 5.2.0, built into Emby's ffmpeg ..." for the OCR model help; null if it can't be told.
+        private string OcrEngine()
+        {
+            try { return Core.OcrEngineInfo.Describe(_ffmpeg?.FfmpegConfiguration?.EncoderPath); }
+            catch (Exception) { return null; }
         }
 
         private static Plugin Plugin => Plugin.Instance ?? throw new InvalidOperationException("SubRemover isn't loaded.");
@@ -144,7 +154,7 @@ namespace Emby.Subremover
             {
                 Title = "SubRemover v" + Plugin.VersionText,
                 Description = PluginOptions.PageDescription,
-                Tabs = SettingsLayout.Page(),
+                Tabs = SettingsLayout.Page(OcrEngine()),
                 Values = SettingsLayout.Values(options),
                 Libraries = plugin.LibraryChoices().Select(c => new OptionDto { Value = c.Value, Name = c.Name }).ToList(),
                 Languages = Plugin.LanguageChoicesFor(options.KeepLanguages).Select(c => new OptionDto { Value = c.Value, Name = c.Name }).ToList(),

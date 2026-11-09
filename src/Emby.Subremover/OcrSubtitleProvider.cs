@@ -117,7 +117,11 @@ namespace Emby.Subremover
             {
                 _log.Info($"SubRemover: subtitle search - OCR of {stream.Describe()} in {offer.VideoPath}");
                 Notify(offer.VideoPath, "Reading the subtitles with OCR. This takes a few minutes; keep watching, they'll be in the subtitle menu when ready.");
-                var job = new OcrJob { Stream = stream, OutputPath = temp, TesseractLanguage = offer.TesseractLanguage };
+                var job = new OcrJob
+                {
+                    Stream = stream, OutputPath = temp, TesseractLanguage = offer.TesseractLanguage,
+                    Models = Plugin.Instance?.Options?.OcrModel ?? OcrModels.Both
+                };
                 var problem = await SubtitleOcr.Run(_runner, _tessdata, offer.VideoPath, job, CancellationToken.None).ConfigureAwait(false);
                 if (problem != null)
                 {

@@ -51,6 +51,9 @@ namespace Emby.Subremover.Core
         public ProbeStream Stream { get; set; }
         public string OutputPath { get; set; }
         public string TesseractLanguage { get; set; }
+
+        /// <summary>Set from the settings when the job runs; not part of the plan, so changing it doesn't redo videos.</summary>
+        public OcrModels Models { get; set; }
     }
 
     public class SubtitlePlan
