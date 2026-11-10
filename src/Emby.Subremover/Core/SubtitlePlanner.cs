@@ -84,6 +84,9 @@ namespace Emby.Subremover.Core
         /// <summary>Kept tracks whose "default" flag comes off so Emby turns the existing file on instead (when NewDefault is null).</summary>
         public List<ProbeStream> ClearDefault { get; } = new List<ProbeStream>();
 
+        /// <summary>Tracks whose default flag should have come off but can't (MP4/MOV keep one subtitle on); for the log.</summary>
+        public List<ProbeStream> DefaultStaysOn { get; } = new List<ProbeStream>();
+
         public bool NeedsRemux => Remove.Count > 0 || NewDefault != null || ClearDefault.Count > 0 || LanguageChanges().Count > 0;
 
         /// <summary>Guessed languages to write into kept tracks, by input stream index.</summary>
@@ -231,6 +234,15 @@ namespace Emby.Subremover.Core
             // the track's own language: a guess only noted for files ("never change tracks") doesn't change the video.
             if (canFlag && plan.NewDefault == null)
                 plan.ClearDefault.AddRange(plan.Keep.Where(x => plan.LeftToExistingFiles.ContainsKey(x.Language) && x.Disposition("default")));
+
+            // MP4/MOV turn the first subtitle back on when none is default, so clearing the last one would fail the check
+            // after every rewrite. The flag stays; the unwanted tracks still go.
+            if (plan.ClearDefault.Count > 0 && FfmpegArgs.KeepsOneSubtitleOn(videoPath)
+                && !plan.Keep.Any(x => x.Disposition("default") && !plan.ClearDefault.Contains(x)))
+            {
+                plan.DefaultStaysOn.AddRange(plan.ClearDefault);
+                plan.ClearDefault.Clear();
+            }
             return plan;
         }
 

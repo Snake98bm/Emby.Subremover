@@ -370,6 +370,41 @@ public class OcrPlannerTests
     }
 
     [Fact]
+    public void An_mp4_keeps_its_last_default_subtitle_but_still_loses_the_unwanted_tracks()
+    {
+        const string mp4 = @"D:\Shows\My Show\Season 01\My Show - S01E07.mp4";
+        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng"), RemoveHearingImpaired = true, PreferExistingFiles = true };
+        var probe = Movie(Sub(3, "eng", codec: "mov_text", isDefault: true), Sub(4, "eng", codec: "mov_text", sdh: true), Sub(5, "spa", codec: "mov_text"));
+        var existing = new Dictionary<string, string> { ["eng"] = "My Show - S01E07.eng.srt" };
+
+        var plan = SubtitlePlanner.Plan(probe, settings, mp4, existing);
+
+        Assert.Equal(new[] { 4, 5 }, plan.Remove.Select(s => s.index));
+        Assert.Empty(plan.DefaultChanges());
+        Assert.Equal(new[] { 3 }, plan.DefaultStaysOn.Select(s => s.index));
+        Assert.Contains("default flag stays on #3", MediaProcessor.DescribePlan(mp4, plan, dryRun: true));
+
+        // The same video as MKV can clear it.
+        var mkv = SubtitlePlanner.Plan(probe, settings, Path.ChangeExtension(mp4, ".mkv"), existing);
+        Assert.Equal(new Dictionary<int, bool> { [3] = false }, mkv.DefaultChanges());
+        Assert.Empty(mkv.DefaultStaysOn);
+    }
+
+    [Fact]
+    public void An_mp4_can_clear_a_default_when_another_subtitle_stays_default()
+    {
+        const string mp4 = @"D:\Movies\My Movie (2020)\My Movie (2020).mp4";
+        var settings = new PlannerSettings { KeepLanguages = PlannerSettings.ParseLanguages("eng, fre"), PreferExistingFiles = true };
+        var probe = Movie(Sub(2, "eng", codec: "mov_text", isDefault: true), Sub(3, "fre", codec: "mov_text", isDefault: true));
+        var existing = new Dictionary<string, string> { ["eng"] = "My Movie (2020).eng.srt" };
+
+        var plan = SubtitlePlanner.Plan(probe, settings, mp4, existing);
+
+        Assert.Equal(new Dictionary<int, bool> { [2] = false }, plan.DefaultChanges());
+        Assert.Empty(plan.DefaultStaysOn);
+    }
+
+    [Fact]
     public void A_language_with_an_existing_file_gets_no_file_of_ours_and_loses_the_embedded_default()
     {
         var settings = Ocr("eng, spa");

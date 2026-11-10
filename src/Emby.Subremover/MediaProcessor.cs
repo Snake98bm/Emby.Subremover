@@ -287,7 +287,8 @@ namespace Emby.Subremover
                    (plan.NewDefault != null ? "\n    default: " + plan.NewDefault.Describe() : "") +
                    (plan.LeftToExistingFiles.Count > 0
                        ? "\n    existing: " + string.Join(", ", plan.LeftToExistingFiles.Select(kv => kv.Key + " -> " + kv.Value)) +
-                         " (no file of ours in that language" + (plan.ClearDefault.Count > 0 ? "; default flag off " + Streams(plan.ClearDefault) : "") + ")"
+                         " (no file of ours in that language" + (plan.ClearDefault.Count > 0 ? "; default flag off " + Streams(plan.ClearDefault) : "") +
+                         (plan.DefaultStaysOn.Count > 0 ? "; default flag stays on " + Streams(plan.DefaultStaysOn) + ": MP4 always keeps one subtitle on" : "") + ")"
                        : "") +
                    (plan.LanguageChanges().Count > 0 ? "\n    language: " + Streams(plan.Keep.Where(s => s.LanguageGuessed)) + " written into the video" : "");
         }

@@ -26,7 +26,7 @@ namespace Emby.Subremover.Core
 
         public static List<string> Describe(string videoPath, SubtitlePlan plan, IEnumerable<MadeFile> made, OcrModels model)
         {
-            var stem = Path.GetFileNameWithoutExtension(videoPath) ?? "";
+            var stem = Path.GetFileNameWithoutExtension(FileName(videoPath));
             var made_ = (made ?? Enumerable.Empty<MadeFile>()).ToList();
 
             var removed = plan.Remove.Count == 0
@@ -39,7 +39,7 @@ namespace Emby.Subremover.Core
             var ocr = made_.Where(m => m.Ocr).Select(m => Short(m.Path, stem)).ToList();
             if (ocr.Count > 0) other.Add($"made {List(ocr)} (OCR, {ModelText(model)})");
             if (plan.NewDefault != null) other.Add("default now " + Label(plan.NewDefault));
-            else if (plan.ClearDefault.Count > 0) other.Add("default left to the subtitle file already there");
+            else if (plan.ClearDefault.Count > 0) other.Add(DefaultTurnedOff(plan, stem));
             var languages = plan.LanguageChanges().Count;
             if (languages > 0) other.Add($"language written into {languages} track{(languages == 1 ? "" : "s")}");
 
@@ -53,6 +53,25 @@ namespace Emby.Subremover.Core
             }
             if (lines.Count == 0) lines.Add("Rewrote the video");
             return lines;
+        }
+
+        /// <summary>What older backups (0.7.7) stored for a default handed to an existing file, without the file's name.</summary>
+        public const string OldDefaultNote = "Default left to the subtitle file already there";
+
+        /// <summary>The same in plain words, shown instead of <see cref="OldDefaultNote"/>.</summary>
+        public const string OldDefaultNoteShown =
+            "Turned off the default on the built-in subtitle, so Emby shows the subtitle file next to the video instead";
+
+        // "turned off the default on the built-in English SDH subtitle, so Emby shows .eng.sdh.srt instead"
+        private static string DefaultTurnedOff(SubtitlePlan plan, string stem)
+        {
+            var tracks = List(Grouped(plan.ClearDefault.Select(Label)));
+            var files = plan.ClearDefault
+                .Select(s => plan.LeftToExistingFiles.TryGetValue(s.Language ?? "", out var f) ? Short(f, stem) : null)
+                .Where(f => f != null).Distinct().ToList();
+            var subtitles = plan.ClearDefault.Count == 1 ? "subtitle" : "subtitles";
+            return $"turned off the default on the built-in {tracks} {subtitles}, so Emby shows " +
+                   (files.Count > 0 ? List(files) : "the subtitle file next to the video") + " instead";
         }
 
         /// <summary>"French", "English SDH", "English commentary", "Spanish forced".</summary>
@@ -79,8 +98,16 @@ namespace Emby.Subremover.Core
         // "My Movie (2020).pgs.eng.srt" → ".pgs.eng.srt": the folder and video name are already on the row.
         private static string Short(string file, string stem)
         {
-            var name = Path.GetFileName(file) ?? file;
+            var name = FileName(file);
             return name.StartsWith(stem + ".", StringComparison.OrdinalIgnoreCase) ? name.Substring(stem.Length) : name;
+        }
+
+        // The name after the last \ or /: a Windows share path stays readable on a Linux server, where \ isn't a separator.
+        private static string FileName(string path)
+        {
+            if (string.IsNullOrEmpty(path)) return "";
+            var cut = Math.Max(path.LastIndexOf('\\'), path.LastIndexOf('/'));
+            return cut >= 0 ? path.Substring(cut + 1) : path;
         }
 
         private static string ModelText(OcrModels model) =>
