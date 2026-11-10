@@ -313,7 +313,9 @@ define([], function () {
                     table.appendChild(h('tr', {}, [
                         h('td', {}, [box]),
                         h('td', {}, [h('div', { class: 'sr-file', text: item.File }), h('div', { class: 'sr-folder', text: item.Folder }),
-                            item.Missing ? h('div', { class: 'sr-folder', text: 'Backup missing — will be skipped.' }) : null]),
+                            item.Missing ? h('div', { class: 'sr-folder', text: 'Backup missing — will be skipped.' }) : null]
+                            .concat((item.Changes || []).map(function (line) { return h('div', { class: 'sr-change', text: line }); }))
+                            .concat(item.ChangesNote ? [h('div', { class: 'sr-change sr-unrecorded', text: item.ChangesNote })] : [])),
                         h('td', { text: item.Made })
                     ]));
                 });

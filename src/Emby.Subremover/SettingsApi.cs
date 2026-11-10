@@ -114,6 +114,12 @@ namespace Emby.Subremover
         public string Folder { get; set; }
         public string Made { get; set; }
         public bool Missing { get; set; }
+
+        /// <summary>What SubRemover changed, one or two lines.</summary>
+        public List<string> Changes { get; set; }
+
+        /// <summary>Shown instead when nothing was recorded (older backups).</summary>
+        public string ChangesNote { get; set; }
     }
 
     public class LogViewDto
@@ -207,7 +213,9 @@ namespace Emby.Subremover
                     File = Path.GetFileName(b.OriginalPath),
                     Folder = Path.GetDirectoryName(b.OriginalPath),
                     Made = b.CreatedUtc.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture),
-                    Missing = !File.Exists(b.BackupPath)
+                    Missing = !File.Exists(b.BackupPath),
+                    Changes = b.Changes ?? new List<string>(),
+                    ChangesNote = b.Changes == null ? "Changes weren't recorded (backup made before 0.7.7)" : null
                 }).ToList()
             };
         }

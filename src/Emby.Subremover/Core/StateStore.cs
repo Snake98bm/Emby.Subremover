@@ -26,6 +26,12 @@ namespace Emby.Subremover.Core
         public string OriginalPath { get; set; }
         public string BackupPath { get; set; }
         public DateTime CreatedUtc { get; set; }
+
+        /// <summary>
+        /// What SubRemover changed (one or two lines, see BackupNotes), shown in the restore list. Null for backups made
+        /// before 0.7.7.
+        /// </summary>
+        public List<string> Changes { get; set; }
     }
 
     public class RunSummary
@@ -59,6 +65,12 @@ namespace Emby.Subremover.Core
 
         /// <summary>Subtitle files SubRemover wrote (extracted or OCR), so they're never taken for files Emby downloaded.</summary>
         public HashSet<string> MadeFiles { get; set; } = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Which OCR made each OCR file a run wrote. Files from before 0.7.7 have none, so they count as older.</summary>
+        public Dictionary<string, OcrRecord> OcrFiles { get; set; } = new Dictionary<string, OcrRecord>(StringComparer.OrdinalIgnoreCase);
+
+        public bool OcrFileIsCurrent(string path, OcrModels chosen) =>
+            OcrFiles.TryGetValue(path, out var record) && OcrVersion.IsCurrent(record, chosen);
 
         public bool IsRestored(string path) => Restored.Contains(path, StringComparer.OrdinalIgnoreCase);
 
@@ -96,8 +108,9 @@ namespace Emby.Subremover.Core
                 Processed = new Dictionary<string, FileStamp>(Processed, StringComparer.OrdinalIgnoreCase),
                 Restored = new List<string>(Restored),
                 // Copies: a test run may point them at moved videos, and that mustn't reach the real list.
-                Backups = Backups.Select(b => new BackupEntry { OriginalPath = b.OriginalPath, BackupPath = b.BackupPath, CreatedUtc = b.CreatedUtc }).ToList(),
-                MadeFiles = new HashSet<string>(MadeFiles, StringComparer.OrdinalIgnoreCase)
+                Backups = Backups.Select(b => new BackupEntry { OriginalPath = b.OriginalPath, BackupPath = b.BackupPath, CreatedUtc = b.CreatedUtc, Changes = b.Changes }).ToList(),
+                MadeFiles = new HashSet<string>(MadeFiles, StringComparer.OrdinalIgnoreCase),
+                OcrFiles = new Dictionary<string, OcrRecord>(OcrFiles, StringComparer.OrdinalIgnoreCase)
             };
             if (recheckEverything) copy.ForgetEverything();
             copy.ApplySettingsSignature(signature);
@@ -129,6 +142,8 @@ namespace Emby.Subremover.Core
                 state.Processed = new Dictionary<string, FileStamp>(state.Processed ?? new Dictionary<string, FileStamp>(), StringComparer.OrdinalIgnoreCase);
                 state.Backups = state.Backups ?? new List<BackupEntry>();
                 state.Restored = state.Restored ?? new List<string>();
+                state.MadeFiles = new HashSet<string>(state.MadeFiles ?? new HashSet<string>(), StringComparer.OrdinalIgnoreCase);
+                state.OcrFiles = new Dictionary<string, OcrRecord>(state.OcrFiles ?? new Dictionary<string, OcrRecord>(), StringComparer.OrdinalIgnoreCase);
                 return state;
             }
         }

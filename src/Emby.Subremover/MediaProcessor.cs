@@ -34,14 +34,16 @@ namespace Emby.Subremover
         private readonly IJsonSerializer _json;
         private readonly ILogger _log;
         private readonly Tessdata _tessdata;
+        private readonly SearchOcrStore _searchOcr;
 
         /// <summary>What this processor did (or would do in test mode) so far; one processor is made per run.</summary>
         public RunTotals Totals { get; } = new RunTotals();
 
         public MediaProcessor(FfmpegRunner runner, ILibraryMonitor libraryMonitor, IProviderManager providerManager,
-            IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata)
+            IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata, SearchOcrStore searchOcr = null)
         {
             _tessdata = tessdata;
+            _searchOcr = searchOcr;
             _runner = runner;
             _libraryMonitor = libraryMonitor;
             _providerManager = providerManager;
@@ -61,6 +63,7 @@ namespace Emby.Subremover
             RemoveExtractedFromVideo = o.ExtractTextSubtitles && o.RemoveExtractedFromVideo,
             OcrPictureSubtitles = o.OcrPictureSubtitles,
             OcrReplaceExisting = o.OcrExistingFile == ExistingOcrFile.Replace,
+            OcrRedoOlder = o.OcrExistingFile == ExistingOcrFile.RedoIfMadeByAnOlderOcr ? OcrVersion.Current + "/" + o.OcrModel : "",
             MakeRegularDefault = o.MakeRegularDefault,
             MarkDefaultInName = o.MarkDefaultInName,
             GuessLanguages = o.GuessLanguages,
@@ -90,7 +93,19 @@ namespace Emby.Subremover
                 await GuessLanguages(path, before, settings, options.GuessForFilesOnly, ct).ConfigureAwait(false);
 
             var existing = options.PreferExistingFiles ? ExistingSubtitles.Find(path, state.MadeFiles) : null;
-            var plan = SubtitlePlanner.Plan(before, settings, path, existing);
+            var redoOlder = options.OcrExistingFile == ExistingOcrFile.RedoIfMadeByAnOlderOcr && _searchOcr != null;
+            var searchRecords = redoOlder ? _searchOcr.Load() : new System.Collections.Generic.List<SearchOcrRecord>();
+            // Current if a run made it with today's OCR, or the subtitle search saved today's OCR into it.
+            bool OcrFileIsCurrent(string f) =>
+                state.OcrFileIsCurrent(f, options.OcrModel)
+                || searchRecords.Any(r => string.Equals(r.FilePath, f, StringComparison.OrdinalIgnoreCase) && OcrVersion.IsCurrent(r, options.OcrModel));
+            var plan = SubtitlePlanner.Plan(before, settings, path, existing, OcrFileIsCurrent);
+
+            // Files Emby saved from the subtitle search, made by an older OCR: redone in place, like our own OCR files.
+            if (redoOlder)
+                plan.Ocr.AddRange(SearchOcrRedo.Jobs(path, before, searchRecords, options.OcrModel)
+                    .Where(j => !plan.Ocr.Any(o => string.Equals(o.OutputPath, j.OutputPath, StringComparison.OrdinalIgnoreCase))));
+
             if (!plan.HasWork)
             {
                 _log.Debug("SubRemover: nothing to do for {0}", path);
@@ -144,11 +159,14 @@ namespace Emby.Subremover
         private async Task<Outcome> Apply(BaseItem item, string path, ProbeResult before, SubtitlePlan plan, PluginOptions options,
             SubremoverState state, StateStore store, CancellationToken ct)
         {
+            // What was made next to the video, for the backup's note in the restore list.
+            var made = new List<MadeFile>();
             foreach (var job in plan.Extract)
             {
                 var extracted = await Extract(path, job, before.FrameCountsAreCurrent, state.MadeFiles, ct).ConfigureAwait(false);
                 if (extracted == ExtractOutcome.Failed) return Outcome.Failed;
                 if (extracted == ExtractOutcome.KeepTrackInVideo && plan.Remove.Remove(job.Stream)) plan.Keep.Add(job.Stream);
+                if (extracted == ExtractOutcome.Done) made.Add(new MadeFile { Path = job.OutputPath });
             }
 
             // OCR before the remux: the stream indexes in the plan belong to the original file.
@@ -161,7 +179,28 @@ namespace Emby.Subremover
                 {
                     _log.Info("SubRemover: OCR {0} -> {1}", job.Stream.Describe(), job.OutputPath);
                     Totals.AddOcr(job.OutputPath);
-                    state.MadeFiles.Add(job.OutputPath);
+                    made.Add(new MadeFile { Path = job.OutputPath, Ocr = true });
+                    if (job.SearchRecord != null)
+                    {
+                        // Still Emby's file (it shows up as a downloaded subtitle); only its record changes.
+                        var redone = job.SearchRecord;
+                        var text = File.ReadAllText(job.OutputPath);
+                        _searchOcr.Update(list =>
+                        {
+                            foreach (var r in list.Where(r => string.Equals(r.VideoPath, redone.VideoPath, StringComparison.OrdinalIgnoreCase) && r.StreamIndex == redone.StreamIndex))
+                            {
+                                var fresh = OcrVersion.Record(job.Models);
+                                r.Version = fresh.Version; r.Model = fresh.Model; r.MadeUtc = fresh.MadeUtc;
+                                r.TextHash = OcrVersion.TextHash(text);
+                                r.FilePath = job.OutputPath;
+                            }
+                        });
+                    }
+                    else
+                    {
+                        state.MadeFiles.Add(job.OutputPath);
+                        state.OcrFiles[job.OutputPath] = OcrVersion.Record(job.Models);
+                    }
                 }
                 else
                 {
@@ -173,7 +212,8 @@ namespace Emby.Subremover
 
             if (plan.NeedsRemux)
             {
-                if (!await RemuxAndSwap(path, before, plan, options, state, ct).ConfigureAwait(false)) return Outcome.Failed;
+                var notes = BackupNotes.Describe(path, plan, made, options.OcrModel);
+                if (!await RemuxAndSwap(path, before, plan, options, state, notes, ct).ConfigureAwait(false)) return Outcome.Failed;
                 Totals.AddRemux(plan);
             }
 
@@ -315,7 +355,8 @@ namespace Emby.Subremover
             return ExtractOutcome.Failed;
         }
 
-        private async Task<bool> RemuxAndSwap(string path, ProbeResult before, SubtitlePlan plan, PluginOptions options, SubremoverState state, CancellationToken ct)
+        private async Task<bool> RemuxAndSwap(string path, ProbeResult before, SubtitlePlan plan, PluginOptions options, SubremoverState state,
+            List<string> notes, CancellationToken ct)
         {
             var muxer = FfmpegArgs.MuxerFor(path);
             if (muxer == null)
@@ -354,7 +395,7 @@ namespace Emby.Subremover
                     return false;
                 }
 
-                return Swap(path, temp, options, state);
+                return Swap(path, temp, options, state, notes);
             }
             catch (OperationCanceledException)
             {
@@ -367,7 +408,7 @@ namespace Emby.Subremover
             }
         }
 
-        private bool Swap(string path, string temp, PluginOptions options, SubremoverState state)
+        private bool Swap(string path, string temp, PluginOptions options, SubremoverState state, List<string> notes)
         {
             var result = BackupManager.Replace(path, temp, options.BackupMode, options.BackupFolder);
             if (!result.Success)
@@ -377,7 +418,17 @@ namespace Emby.Subremover
             }
 
             if (result.Message != null) _log.Debug("SubRemover: {0}: {1}", path, result.Message);
-            if (result.NewBackup != null) state.Backups.Add(result.NewBackup);
+            if (result.NewBackup != null)
+            {
+                result.NewBackup.Changes = notes;
+                state.Backups.Add(result.NewBackup);
+            }
+            else if (result.BackupPath != null)
+            {
+                // The backup from an earlier run is still the original: it now undoes this run's changes too.
+                var earlier = state.Backups.LastOrDefault(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase));
+                if (earlier?.Changes != null) earlier.Changes = earlier.Changes.Concat(notes ?? new List<string>()).Distinct().ToList();
+            }
             _log.Info("SubRemover: updated {0}{1}", path, result.BackupPath != null ? " (backup: " + result.BackupPath + ")" : " (no backup kept)");
             return true;
         }

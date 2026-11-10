@@ -37,10 +37,14 @@ namespace Emby.Subremover
         private readonly ILibraryManager _libraryManager;
         private readonly IProviderManager _providerManager;
         private readonly IFileSystem _fileSystem;
+        private readonly StateStore _state;
+        private readonly SearchOcrStore _searchOcr;
 
         public OcrSubtitleProvider(IFfmpegManager ffmpegManager, IApplicationPaths appPaths, IJsonSerializer json, ILogManager logManager,
             ISessionManager sessions, ILibraryManager libraryManager, IProviderManager providerManager, IFileSystem fileSystem)
         {
+            _state = new StateStore(appPaths.PluginConfigurationsPath, json);
+            _searchOcr = new SearchOcrStore(appPaths.PluginConfigurationsPath, json);
             _runner = FfmpegRunner.FromEmby(ffmpegManager);
             _tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
             _json = json;
@@ -85,12 +89,15 @@ namespace Emby.Subremover
             var stream = probe?.streams.FirstOrDefault(s => s.index == offer.StreamIndex && s.IsSubtitle)
                          ?? throw new InvalidOperationException($"Subtitle track #{offer.StreamIndex} is no longer in {offer.VideoPath}");
 
-            // An OCR file a SubRemover run already made for this track is used as it is.
+            // An OCR file a SubRemover run already made for this track is used as it is, if today's OCR made it.
             var made = SubtitlePlanner.OcrFilePath(offer.VideoPath, stream);
-            if (File.Exists(made))
+            var model = Plugin.Instance?.Options?.OcrModel ?? OcrModels.Both;
+            if (File.Exists(made) && LoadState().OcrFileIsCurrent(made, model))
             {
                 _log.Info($"SubRemover: subtitle search - using the existing OCR file {made}");
-                return Response(offer, File.ReadAllText(made));
+                var existing = File.ReadAllText(made);
+                Remember(offer, stream, existing, model, null);
+                return Response(offer, existing);
             }
 
             // The OCR doesn't stop when the page stops waiting (dialog closed, request timed out): it finishes and the
@@ -99,13 +106,46 @@ namespace Emby.Subremover
             var gaveUp = Task.Delay(Timeout.Infinite, cancellationToken);
             if (await Task.WhenAny(work, gaveUp).ConfigureAwait(false) == gaveUp)
             {
-                _ = work.ContinueWith(t => SaveForLater(offer, made, t), TaskScheduler.Default);
+                _ = work.ContinueWith(t => SaveForLater(offer, stream, model, made, t), TaskScheduler.Default);
                 throw new OperationCanceledException(cancellationToken);
             }
 
             var text = await work.ConfigureAwait(false);
+            Remember(offer, stream, text, model, null);
             Notify(offer.VideoPath, "The OCR subtitles are ready. Open the subtitle menu and pick the new English one (reopen the menu if it isn't there yet).");
             return Response(offer, text);
+        }
+
+        private SubremoverState LoadState()
+        {
+            try { return _state.Load(); }
+            catch (Exception) { return new SubremoverState(); }
+        }
+
+        // So a run with "Redo if made by an older OCR" can find the file Emby saves from this text and redo it later.
+        private void Remember(OcrOffer offer, ProbeStream stream, string text, OcrModels model, string filePath)
+        {
+            try
+            {
+                var record = OcrVersion.Record(model);
+                _searchOcr.Add(new SearchOcrRecord
+                {
+                    Version = record.Version,
+                    Model = record.Model,
+                    MadeUtc = record.MadeUtc,
+                    VideoPath = offer.VideoPath,
+                    StreamIndex = stream.index,
+                    Codec = stream.codec_name,
+                    Language = stream.Language,
+                    Title = stream.Tag("title"),
+                    TextHash = OcrVersion.TextHash(text),
+                    FilePath = filePath
+                });
+            }
+            catch (Exception ex)
+            {
+                _log.Debug($"SubRemover: subtitle search - couldn't note the OCR for {offer.VideoPath}: {ex.Message}");
+            }
         }
 
         private async Task<string> Ocr(OcrOffer offer, ProbeStream stream)
@@ -139,12 +179,14 @@ namespace Emby.Subremover
         }
 
         // The page stopped waiting: keep the text as the OCR file a SubRemover run would make, and let Emby find it.
-        private void SaveForLater(OcrOffer offer, string path, Task<string> work)
+        private void SaveForLater(OcrOffer offer, ProbeStream stream, OcrModels model, string path, Task<string> work)
         {
             if (work.Status != TaskStatus.RanToCompletion) return;
             try
             {
-                if (!File.Exists(path)) File.WriteAllText(path, work.Result);
+                // An OCR file from an older OCR is replaced; one from today's OCR was used above and never gets here.
+                File.WriteAllText(path, work.Result);
+                Remember(offer, stream, work.Result, model, path);
                 _log.Info($"SubRemover: subtitle search - the page stopped waiting, so the OCR text was saved as {path}");
                 var item = _libraryManager.FindByPath(offer.VideoPath, false);
                 if (item != null)

@@ -68,6 +68,132 @@ public class OcrPlannerTests
     }
 
     [Fact]
+    public void Redo_if_older_only_redoes_files_an_older_ocr_made()
+    {
+        var dir = Directory.CreateTempSubdirectory("subremover-ocr-redo-").FullName;
+        try
+        {
+            var video = Path.Combine(dir, "Movie.mkv");
+            File.WriteAllText(Path.Combine(dir, "Movie.pgs.eng.srt"), "made by today's OCR");
+            File.WriteAllText(Path.Combine(dir, "Movie.pgs.eng.forced.srt"), "made by an older OCR");
+            var probe = Movie(Sub(2, "eng", codec: "hdmv_pgs_subtitle"), Sub(3, "eng", codec: "hdmv_pgs_subtitle", forced: true));
+            var settings = Ocr("eng");
+            settings.OcrRedoOlder = OcrVersion.Current + "/Both";
+
+            var plan = SubtitlePlanner.Plan(probe, settings, video, null, f => f.EndsWith("Movie.pgs.eng.srt"));
+            Assert.Equal(new[] { "Movie.pgs.eng.forced.srt" }, plan.Ocr.Select(Name));
+
+            // Without the choice, existing files stay whatever made them.
+            Assert.Empty(SubtitlePlanner.Plan(probe, Ocr("eng"), video, null, f => false).Ocr);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void A_newer_ocr_version_makes_every_video_get_checked_again()
+    {
+        var off = Ocr("eng");
+        var on = Ocr("eng");
+        on.OcrRedoOlder = "1/Both";
+        var newer = Ocr("eng");
+        newer.OcrRedoOlder = "2/Both";
+        Assert.NotEqual(off.Signature(), on.Signature());
+        Assert.NotEqual(on.Signature(), newer.Signature());
+    }
+
+    [Fact]
+    public void A_file_is_current_only_from_todays_ocr_and_an_as_good_model()
+    {
+        Assert.False(OcrVersion.IsCurrent(null, OcrModels.Fast));
+        Assert.False(OcrVersion.IsCurrent(new OcrRecord { Version = OcrVersion.Current - 1, Model = "Both" }, OcrModels.Fast));
+        Assert.True(OcrVersion.IsCurrent(OcrVersion.Record(OcrModels.Both), OcrModels.Fast));
+        Assert.True(OcrVersion.IsCurrent(OcrVersion.Record(OcrModels.Fast), OcrModels.Accurate));
+        Assert.False(OcrVersion.IsCurrent(OcrVersion.Record(OcrModels.Fast), OcrModels.Both));
+    }
+
+    [Fact]
+    public void The_text_fingerprint_ignores_numbering_timing_and_line_endings()
+    {
+        const string a = "1\n00:00:01,000 --> 00:00:02,000\nHello.\n\n2\n00:00:03,000 --> 00:00:04,000\nBye.\n\n";
+        const string b = "1\r\n00:00:01,500 --> 00:00:02,500\r\nHello.\r\n\r\n7\r\n00:00:03,000 --> 00:00:04,000\r\nBye.\r\n";
+        Assert.Equal(OcrVersion.TextHash(a), OcrVersion.TextHash(b));
+        Assert.NotEqual(OcrVersion.TextHash(a), OcrVersion.TextHash(a.Replace("Bye.", "Bye!")));
+    }
+
+    [Fact]
+    public void A_subtitle_search_file_from_an_older_ocr_is_found_and_redone_in_place()
+    {
+        var dir = Directory.CreateTempSubdirectory("subremover-search-redo-").FullName;
+        try
+        {
+            var video = Path.Combine(dir, "My Movie (2020).mkv");
+            const string ocrText = "1\n00:00:01,000 --> 00:00:02,000\nl think so.\n\n";
+            File.WriteAllText(Path.Combine(dir, "My Movie (2020).en.srt"), ocrText.Replace("\n", "\r\n"));
+            File.WriteAllText(Path.Combine(dir, "My Movie (2020).fr.srt"), "1\n00:00:01,000 --> 00:00:02,000\nBonjour.\n\n");
+            var record = new SearchOcrRecord
+            {
+                Version = OcrVersion.Current - 1, Model = "Fast", VideoPath = video, StreamIndex = 5,
+                Codec = "hdmv_pgs_subtitle", Language = "eng", TextHash = OcrVersion.TextHash(ocrText)
+            };
+            // A run has since removed two tracks, so the picture track is #3 now.
+            var probe = Movie(Sub(2, "eng"), Sub(3, "eng", codec: "hdmv_pgs_subtitle"));
+
+            var job = Assert.Single(SearchOcrRedo.Jobs(video, probe, new[] { record }, OcrModels.Both));
+            Assert.Equal(Path.Combine(dir, "My Movie (2020).en.srt"), job.OutputPath);
+            Assert.Equal(3, job.Stream.index);
+            Assert.Same(record, job.SearchRecord);
+
+            // Made by today's OCR: nothing to do.
+            var current = OcrVersion.Record(OcrModels.Both);
+            record.Version = current.Version;
+            record.Model = current.Model;
+            Assert.Empty(SearchOcrRedo.Jobs(video, probe, new[] { record }, OcrModels.Both));
+
+            // Edited since (or a different file): left alone.
+            record.Version = 0;
+            File.WriteAllText(Path.Combine(dir, "My Movie (2020).en.srt"), ocrText.Replace("l think", "I think"));
+            Assert.Empty(SearchOcrRedo.Jobs(video, probe, new[] { record }, OcrModels.Both));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void The_search_records_are_kept_one_per_track_and_follow_moved_videos()
+    {
+        var dir = Directory.CreateTempSubdirectory("subremover-search-store-").FullName;
+        try
+        {
+            var store = new SearchOcrStore(dir, new TestJsonSerializer());
+            var oldVideo = Path.Combine(dir, "Old", "My Movie (2020).mkv");
+            var newVideo = Path.Combine(dir, "New", "My Movie (2020).mkv");
+            store.Add(new SearchOcrRecord { VideoPath = oldVideo, StreamIndex = 3, Version = 0, FilePath = Path.Combine(dir, "Old", "My Movie (2020).pgs.eng.srt") });
+            store.Add(new SearchOcrRecord { VideoPath = oldVideo, StreamIndex = 3, Version = 1 });
+            store.Add(new SearchOcrRecord { VideoPath = oldVideo, StreamIndex = 4, Version = 1 });
+            Assert.Equal(2, store.Load().Count);
+            Assert.Equal(1, store.Load().Single(r => r.StreamIndex == 3).Version);
+
+            store.ApplyMoves(new[] { new MovedVideos.Move { From = oldVideo, To = newVideo } });
+            Assert.All(store.Load(), r => Assert.Equal(newVideo, r.VideoPath));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public void The_new_choice_reads_well_on_the_page()
+    {
+        Assert.Equal("Redo if made by an older OCR", SettingsLayout.Words(nameof(Emby.Subremover.ExistingOcrFile.RedoIfMadeByAnOlderOcr)));
+    }
+
+    [Fact]
     public void An_existing_ocr_file_is_kept_unless_replace_is_chosen()
     {
         var dir = Directory.CreateTempSubdirectory("subremover-ocr-plan-").FullName;

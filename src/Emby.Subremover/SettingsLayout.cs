@@ -176,6 +176,7 @@ namespace Emby.Subremover
         internal static string Words(string name)
         {
             var words = Regex.Replace(name, "(?<=[a-z])(?=[A-Z])", " ").ToLowerInvariant();
+            words = Regex.Replace(words, @"\bocr\b", "OCR");
             return char.ToUpperInvariant(words[0]) + words.Substring(1);
         }
 
