@@ -32,6 +32,16 @@ namespace Emby.Subremover.Core
             return muxer != null && MuxersWithSubtitleFlags.Contains(muxer);
         }
 
+        /// <summary>
+        /// MP4 and MOV always turn the first subtitle track on when none is marked default (ffmpeg's MP4 writer enables
+        /// the first track of each kind), so there the last default subtitle flag can't be taken off.
+        /// </summary>
+        public static bool KeepsOneSubtitleOn(string path)
+        {
+            var muxer = MuxerFor(path);
+            return muxer == "mp4" || muxer == "mov";
+        }
+
         public static string MuxerFor(string path) =>
             MuxerByExtension.TryGetValue(Path.GetExtension(path) ?? "", out var muxer) ? muxer : null;
 

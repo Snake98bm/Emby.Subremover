@@ -48,6 +48,18 @@ public class BackupNotesTests
     }
 
     [Fact]
+    public void Handing_the_default_to_a_downloaded_file_says_which_track_and_which_file()
+    {
+        var plan = new SubtitlePlan();
+        plan.Keep.Add(Sub(2, "eng", sdh: true, isDefault: true));
+        plan.ClearDefault.Add(plan.Keep[0]);
+        plan.LeftToExistingFiles["eng"] = "My Movie (2020).eng.sdh.srt";
+
+        Assert.Equal(new[] { "Turned off the default on the built-in English SDH subtitle, so Emby shows .eng.sdh.srt instead" },
+            BackupNotes.Describe(Video, plan, null, OcrModels.Both));
+    }
+
+    [Fact]
     public void A_long_list_is_cut_short()
     {
         var plan = new SubtitlePlan();

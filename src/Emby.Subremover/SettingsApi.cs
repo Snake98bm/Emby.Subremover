@@ -214,7 +214,8 @@ namespace Emby.Subremover
                     Folder = Path.GetDirectoryName(b.OriginalPath),
                     Made = b.CreatedUtc.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture),
                     Missing = !File.Exists(b.BackupPath),
-                    Changes = b.Changes ?? new List<string>(),
+                    Changes = (b.Changes ?? new List<string>())
+                        .Select(c => c == Core.BackupNotes.OldDefaultNote ? Core.BackupNotes.OldDefaultNoteShown : c).ToList(),
                     ChangesNote = b.Changes == null ? "Changes weren't recorded (backup made before 0.7.7)" : null
                 }).ToList()
             };
