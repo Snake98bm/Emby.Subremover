@@ -82,8 +82,14 @@ namespace Emby.Subremover.Core
                 foreach (var made in state.MadeFiles.Where(f => Paths.Equals(Path.GetDirectoryName(f), oldFolder)
                                                                 && Path.GetFileName(f).StartsWith(stem, StringComparison.OrdinalIgnoreCase)).ToList())
                 {
+                    var newPath = Path.Combine(Path.GetDirectoryName(m.Value), Path.GetFileName(made));
                     state.MadeFiles.Remove(made);
-                    state.MadeFiles.Add(Path.Combine(Path.GetDirectoryName(m.Value), Path.GetFileName(made)));
+                    state.MadeFiles.Add(newPath);
+                    if (state.OcrFiles.TryGetValue(made, out var record))
+                    {
+                        state.OcrFiles.Remove(made);
+                        state.OcrFiles[newPath] = record;
+                    }
                 }
             }
 

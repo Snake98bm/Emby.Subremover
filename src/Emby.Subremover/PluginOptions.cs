@@ -11,7 +11,8 @@ namespace Emby.Subremover
     public enum ExistingOcrFile
     {
         KeepExisting,
-        Replace
+        Replace,
+        RedoIfMadeByAnOlderOcr
     }
 
     // The saved settings. Each one's label, description and limits are what the settings page shows (SettingsLayout.cs puts
@@ -103,7 +104,7 @@ namespace Emby.Subremover
         public OcrModels OcrModel { get; set; } = OcrModels.Both;
 
         [DisplayName("If the OCR subtitle file already exists")]
-        [VisibleCondition(nameof(OcrPictureSubtitles), SimpleCondition.IsTrue)]
+        [Description("Redo if made by an older OCR also covers files saved from the subtitle search.")]
         public ExistingOcrFile OcrExistingFile { get; set; } = ExistingOcrFile.KeepExisting;
 
         [DisplayName("Mark the regular subtitle file as default")]

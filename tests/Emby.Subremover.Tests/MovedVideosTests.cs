@@ -107,8 +107,13 @@ public class MovedVideosTests
         state.MadeFiles.Add(Path.Combine(oldFolder, "My Movie (2020).eng.srt"));
         state.MadeFiles.Add(Path.Combine(oldFolder, "My Movie (2020).pgs.eng.srt"));
         state.MadeFiles.Add(Path.Combine(oldFolder, "Other Movie.eng.srt"));
+        state.OcrFiles[Path.Combine(oldFolder, "My Movie (2020).pgs.eng.srt")] = OcrVersion.Record(OcrModels.Both);
 
         Reconnect(state, new[] { NewMovie });
+
+        // Which OCR made the file moves with it.
+        Assert.True(state.OcrFileIsCurrent(Path.Combine(newFolder, "My Movie (2020).pgs.eng.srt"), OcrModels.Both));
+        Assert.Single(state.OcrFiles);
 
         Assert.Contains(Path.Combine(newFolder, "My Movie (2020).eng.srt"), state.MadeFiles);
         Assert.Contains(Path.Combine(newFolder, "My Movie (2020).pgs.eng.srt"), state.MadeFiles);

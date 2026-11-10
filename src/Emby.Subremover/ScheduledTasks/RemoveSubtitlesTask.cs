@@ -24,6 +24,7 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly ILogger _embyLog;
         private readonly string _logDirectory;
         private readonly StateStore _store;
+        private readonly SearchOcrStore _searchOcr;
         private readonly Func<ILogger, MediaProcessor> _newProcessor;
         private ILogger _log;
 
@@ -38,7 +39,8 @@ namespace Emby.Subremover.ScheduledTasks
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
             var runner = FfmpegRunner.FromEmby(ffmpegManager);
             var tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
-            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata);
+            _searchOcr = new SearchOcrStore(appPaths.PluginConfigurationsPath, json);
+            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata, _searchOcr);
         }
 
         public string Name => "Remove unwanted subtitles";
@@ -268,7 +270,11 @@ namespace Emby.Subremover.ScheduledTasks
         {
             var moves = MovedVideos.Reconnect(state, items.Select(i => i.Path).ToList(), File.Exists, MovedVideos.StampOrNull);
             if (moves.Count == 0) return;
-            if (!dryRun) _store.Save(state);
+            if (!dryRun)
+            {
+                _store.Save(state);
+                _searchOcr.ApplyMoves(moves);
+            }
             // One pre-built string: paths may contain braces.
             _log.Info($"SubRemover: {moves.Count} video{(moves.Count == 1 ? "" : "s")} moved since an earlier run" +
                       (dryRun ? " (test mode: a real run would note this)" : "") + "; their records and backups now follow them:" +

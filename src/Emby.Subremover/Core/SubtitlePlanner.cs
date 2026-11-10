@@ -16,6 +16,12 @@ namespace Emby.Subremover.Core
         public bool RemoveExtractedFromVideo { get; set; }
         public bool OcrPictureSubtitles { get; set; }
         public bool OcrReplaceExisting { get; set; }
+
+        /// <summary>
+        /// "Redo if made by an older OCR": the OCR version and model, e.g. "1/Both"; empty when off. Part of the signature,
+        /// so a newer OCR version (or a better model) makes every video get checked again.
+        /// </summary>
+        public string OcrRedoOlder { get; set; } = "";
         public bool MakeRegularDefault { get; set; }
         public bool MarkDefaultInName { get; set; }
 
@@ -36,7 +42,7 @@ namespace Emby.Subremover.Core
         /// <summary>Changes whenever a setting that affects the plan changes, so already-checked videos get checked again.</summary>
         public string Signature() => string.Join("|",
             string.Join(",", KeepLanguages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase)),
-            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting, MakeRegularDefault, MarkDefaultInName, DefaultLanguage, GuessLanguages, GuessForFilesOnly, PreferExistingFiles);
+            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting, OcrRedoOlder, MakeRegularDefault, MarkDefaultInName, DefaultLanguage, GuessLanguages, GuessForFilesOnly, PreferExistingFiles);
     }
 
     public class ExtractJob
@@ -54,6 +60,9 @@ namespace Emby.Subremover.Core
 
         /// <summary>Set from the settings when the job runs; not part of the plan, so changing it doesn't redo videos.</summary>
         public OcrModels Models { get; set; }
+
+        /// <summary>Redoing a file Emby saved from its subtitle search (not one of our "Movie.pgs.eng.srt" files).</summary>
+        public SearchOcrRecord SearchRecord { get; set; }
     }
 
     public class SubtitlePlan
@@ -131,7 +140,9 @@ namespace Emby.Subremover.Core
             SidecarPath(videoPath, s, new HashSet<string>(StringComparer.OrdinalIgnoreCase), "." + PictureCodecMarkers[s.codec_name], ".srt");
 
         /// <param name="existingFiles">Subtitle files already next to the video that SubRemover didn't make (language -> file name).</param>
-        public static SubtitlePlan Plan(ProbeResult probe, PlannerSettings settings, string videoPath, IDictionary<string, string> existingFiles = null)
+        /// <param name="ocrFileIsCurrent">With "Redo if made by an older OCR": whether an existing OCR file was made by today's OCR.</param>
+        public static SubtitlePlan Plan(ProbeResult probe, PlannerSettings settings, string videoPath, IDictionary<string, string> existingFiles = null,
+            Func<string, bool> ocrFileIsCurrent = null)
         {
             var plan = new SubtitlePlan { CanWriteLanguages = FfmpegArgs.CanSetSubtitleFlags(videoPath) };
             var usedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -181,7 +192,8 @@ namespace Emby.Subremover.Core
                 if (WillOcr(s, settings, keptText) && !LeftToFile(s))
                 {
                     var output = SidecarPath(videoPath, s, usedPaths, "." + PictureCodecMarkers[s.codec_name], ".srt", s == defaultSidecar);
-                    if (settings.OcrReplaceExisting || !File.Exists(output))
+                    var redoOlder = !string.IsNullOrEmpty(settings.OcrRedoOlder) && ocrFileIsCurrent != null && !ocrFileIsCurrent(output);
+                    if (settings.OcrReplaceExisting || redoOlder || !File.Exists(output))
                     {
                         plan.Ocr.Add(new OcrJob { Stream = s, OutputPath = output, TesseractLanguage = Languages.TesseractCode(s.Language) });
                     }

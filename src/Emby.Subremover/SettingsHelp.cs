@@ -94,7 +94,11 @@ namespace Emby.Subremover
                 "picture track stays in the video. Skipped when the video also has a text subtitle in that language, and for commentary. " +
                 "The language data (about 4 MB per language) is downloaded the first time. OCR can misread words."),
             (SettingsTabId.SubtitleFiles, "If the OCR subtitle file already exists",
-                "Keep existing leaves an OCR file from an earlier run alone. Replace makes it again."),
+                "Keep existing leaves an OCR file from an earlier run alone. Replace makes it again, every run. Redo if made by an " +
+                "older OCR makes it again only when SubRemover's OCR has improved since (each version of the plugin that reads " +
+                "better says so in its release notes), or when it was made with a weaker OCR model than the one chosen now; " +
+                "files from before SubRemover 0.7.7 count as older. It also covers OCR you picked in Emby's subtitle search: " +
+                "SubRemover remembers those and redoes the file Emby saved, unless you deleted or edited it."),
             (OcrModelTab, OcrModelSetting,
                 "Fast uses Tesseract's fast model (tessdata_fast, about 4 MB per language). Accurate uses its best model (tessdata_best, " +
                 "about 15 MB per language, a little slower); it reads some words better and others worse. Both runs the two at the same " +
