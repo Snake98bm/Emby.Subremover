@@ -43,7 +43,7 @@ namespace Emby.Subremover.ScheduledTasks
             {
                 if (!TaskGate.TryEnter())
                 {
-                    runLog.Summary("SubRemover: the remove task is running - try the restore again when it has finished");
+                    runLog.Summary("SubRemover: another SubRemover task (a run, or removing ads from subtitle files) is running - try the restore again when it has finished");
                     return Task.CompletedTask;
                 }
 

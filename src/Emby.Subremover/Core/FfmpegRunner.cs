@@ -72,6 +72,8 @@ namespace Emby.Subremover.Core
                 proc.Exited += (s, e) => exited.TrySetResult(true);
 
                 proc.Start();
+                // Background work: playback and Emby's own transcoding come first. (On Linux this is a higher nice value.)
+                try { proc.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception) { }
                 proc.BeginOutputReadLine();
                 proc.BeginErrorReadLine();
 

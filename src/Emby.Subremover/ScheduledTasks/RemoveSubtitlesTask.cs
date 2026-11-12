@@ -11,6 +11,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.MediaEncoding;
 using MediaBrowser.Controller.Providers;
+using MediaBrowser.Controller.Subtitles;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Serialization;
@@ -25,12 +26,13 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly string _logDirectory;
         private readonly StateStore _store;
         private readonly SearchOcrStore _searchOcr;
+        private readonly CheckpointStore _checkpoints;
         private readonly Func<ILogger, MediaProcessor> _newProcessor;
         private ILogger _log;
 
         public RemoveSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
             ILibraryMonitor libraryMonitor, IProviderManager providerManager, IFileSystem fileSystem,
-            IJsonSerializer json, IApplicationPaths appPaths)
+            IJsonSerializer json, IApplicationPaths appPaths, ISubtitleManager subtitleManager)
         {
             _libraryManager = libraryManager;
             _embyLog = logManager.GetLogger("SubRemover");
@@ -40,7 +42,10 @@ namespace Emby.Subremover.ScheduledTasks
             var runner = FfmpegRunner.FromEmby(ffmpegManager);
             var tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
             _searchOcr = new SearchOcrStore(appPaths.PluginConfigurationsPath, json);
-            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata, _searchOcr);
+            _checkpoints = new CheckpointStore(appPaths.PluginConfigurationsPath, json);
+            var hashes = new OriginalHashStore(appPaths.PluginConfigurationsPath, json);
+            _newProcessor = log => new MediaProcessor(runner, libraryMonitor, providerManager, fileSystem, json, log, tessdata, _searchOcr,
+                l => new HashMatchedSubtitles(subtitleManager, hashes, l, "SubRemover"));
         }
 
         public string Name => "Remove unwanted subtitles";
@@ -59,7 +64,7 @@ namespace Emby.Subremover.ScheduledTasks
             {
                 if (!TaskGate.TryEnter())
                 {
-                    const string busy = "another SubRemover task (restore) is running - try again when it has finished";
+                    const string busy = "another SubRemover task (restore, or removing ads from subtitle files) is running - try again when it has finished";
                     // Hand the new videos back, so the next run still gets to them.
                     Plugin.Instance.NewVideos.AddRange(newVideos);
                     runLog.Summary("SubRemover: {0}", busy);
@@ -143,34 +148,124 @@ namespace Emby.Subremover.ScheduledTasks
             var counts = Enum.GetValues(typeof(Outcome)).Cast<Outcome>().ToDictionary(o => o, o => 0);
             var limit = LimitFor(options, newVideosOnly: newVideos != null);
             var changes = 0;
-            for (var i = 0; i < items.Count; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                progress.Report(100.0 * i / items.Count);
 
-                Outcome outcome;
+            // "Continue an interrupted run where it stopped". Runs for new videos do their own short list.
+            RunCheckpoint checkpoint = null;
+            var total = items.Count;
+            if (newVideos == null && options.ResumeInterruptedRuns)
+            {
+                var key = RunCheckpoint.KeyFor(signature, options.DryRun, options.Libraries, options.OnlyPathContains);
+                checkpoint = _checkpoints.Load();
+                if (checkpoint != null && (checkpoint.Key != key || checkpoint.DryRun != options.DryRun || options.ReprocessAll))
+                {
+                    _log.Info("SubRemover: an earlier run was interrupted, but the settings have changed since, so this run starts over");
+                    checkpoint = null;
+                }
+                if (checkpoint != null)
+                {
+                    var done = new HashSet<string>(checkpoint.Checked, StringComparer.OrdinalIgnoreCase);
+                    items = items.Where(i => !done.Contains(i.Path)).ToList();
+                    foreach (var kv in checkpoint.Counts)
+                        if (Enum.TryParse(kv.Key, out Outcome o)) counts[o] = kv.Value;
+                    changes = counts[Outcome.Changed] + counts[Outcome.WouldChange];
+                    processor.Totals.CopyFrom(checkpoint.Totals);
+                    _log.Info($"SubRemover: continuing the run interrupted at {checkpoint.StartedUtc.ToLocalTime():d MMM HH:mm}: {done.Count} of {total} videos " +
+                              $"were already checked then (their details are in {checkpoint.LogFile}); {items.Count} to go. The totals below include them.");
+                }
+                else
+                {
+                    checkpoint = new RunCheckpoint { Key = key, DryRun = options.DryRun, StartedUtc = DateTime.UtcNow, LogFile = runLog.FileName };
+                }
+            }
+
+            var checkedBefore = total - items.Count;
+            var checkedVideos = new List<string>();
+            var lastSaved = DateTime.UtcNow;
+            void SaveCheckpoint()
+            {
+                if (checkpoint == null) return;
+                checkpoint.Counts = counts.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value);
+                lock (processor.Totals) checkpoint.Totals = processor.Totals.Copy();
+                try { _checkpoints.Save(checkpoint); } catch (Exception ex) { _log.Debug($"SubRemover: couldn't note the run's progress: {ex.Message}"); }
+                lastSaved = DateTime.UtcNow;
+            }
+
+            // Several videos are checked at once (low priority, "Videos to check at once"); changes happen one at a time,
+            // in order, here.
+            var atOnce = Math.Max(1, Math.Min(8, options.VideosAtOnce));
+            using (var stopChecks = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            {
+                var ahead = new Queue<(BaseItem Item, Task<MediaProcessor.Checked> Check)>();
+                var next = 0;
+                void CheckAhead()
+                {
+                    while (ahead.Count < atOnce && next < items.Count)
+                    {
+                        var item = items[next++];
+                        ahead.Enqueue((item, Task.Run(() => processor.Check(item, options, history, _store, stopChecks.Token))));
+                    }
+                }
+
                 try
                 {
-                    outcome = await processor.Process(items[i], options, history, _store, cancellationToken).ConfigureAwait(false);
+                    CheckAhead();
+                    var position = 0;
+                    while (ahead.Count > 0)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        progress.Report(100.0 * (checkedBefore + position) / Math.Max(1, total));
+                        var (item, check) = ahead.Dequeue();
+                        position++;
+
+                        Outcome outcome;
+                        try
+                        {
+                            var video = await check.ConfigureAwait(false);
+                            CheckAhead();
+                            outcome = await processor.Change(video, options, history, _store, cancellationToken).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            throw;
+                        }
+                        catch (Exception ex)
+                        {
+                            CheckAhead();
+                            _log.ErrorException("SubRemover: unexpected error on {0}", ex, item.Path);
+                            outcome = Outcome.Failed;
+                        }
+                        counts[outcome]++;
+                        checkedVideos.Add(item.Path);
+                        checkpoint?.Checked.Add(item.Path);
+                        if (DateTime.UtcNow - lastSaved > TimeSpan.FromSeconds(30)) SaveCheckpoint();
+
+                        if (outcome == Outcome.Changed || outcome == Outcome.WouldChange) changes++;
+                        if (limit > 0 && changes >= limit)
+                        {
+                            _log.Info("SubRemover: reached the limit of {0} videos per run", limit);
+                            break;
+                        }
+                    }
                 }
                 catch (OperationCanceledException)
                 {
+                    // Stopped: keep where it got to for next time.
+                    SaveCheckpoint();
                     throw;
                 }
-                catch (Exception ex)
+                finally
                 {
-                    _log.ErrorException("SubRemover: unexpected error on {0}", ex, items[i].Path);
-                    outcome = Outcome.Failed;
-                }
-                counts[outcome]++;
-
-                if (outcome == Outcome.Changed || outcome == Outcome.WouldChange) changes++;
-                if (limit > 0 && changes >= limit)
-                {
-                    _log.Info("SubRemover: reached the limit of {0} videos per run", limit);
-                    break;
+                    stopChecks.Cancel();
+                    foreach (var pending in ahead)
+                    {
+                        try { await pending.Check.ConfigureAwait(false); } catch (Exception) { }
+                    }
                 }
             }
+            // Finished (or stopped at the limit): nothing to continue.
+            _checkpoints.Delete();
+
+            if (options.RemoveSubtitleAds) RemoveSubtitleAds(options, state, checkedVideos, cancellationToken);
 
             CleanOldBackups(options, state);
 
@@ -211,18 +306,21 @@ namespace Emby.Subremover.ScheduledTasks
                 .ToDictionary(g => g.Key, g => g.First().Name);
 
         /// <param name="onlyThese">New videos only: still limited to the libraries and path filter.</param>
-        private List<BaseItem> FindVideos(PluginOptions options, ISet<string> onlyThese)
+        private List<BaseItem> FindVideos(PluginOptions options, ISet<string> onlyThese) => FindVideos(_libraryManager, options, onlyThese, _log);
+
+        /// <summary>The videos in the selected libraries and path filter that SubRemover can rewrite.</summary>
+        internal static List<BaseItem> FindVideos(ILibraryManager libraryManager, PluginOptions options, ISet<string> onlyThese, ILogger log)
         {
             var selected = new HashSet<string>(options.Libraries.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).Select(s => s.Trim()));
-            var folders = _libraryManager.GetVirtualFolders().Where(f => selected.Contains(f.ItemId)).ToList();
+            var folders = libraryManager.GetVirtualFolders().Where(f => selected.Contains(f.ItemId)).ToList();
             // The settings list only has the libraries' ids; this names them. One pre-built string: paths may contain braces.
-            _log.Info("SubRemover libraries: " + (folders.Count == 0 ? "none found"
+            log.Info("SubRemover libraries: " + (folders.Count == 0 ? "none found"
                 : string.Join(", ", folders.Select(f => $"{f.Name} ({string.Join("; ", f.Locations ?? Array.Empty<string>())})"))));
             var locations = folders.SelectMany(f => f.Locations ?? Array.Empty<string>()).Select(WithTrailingSeparator).ToArray();
 
             var items = locations.Length == 0
                 ? Array.Empty<BaseItem>()
-                : _libraryManager.GetItemList(new InternalItemsQuery
+                : libraryManager.GetItemList(new InternalItemsQuery
                 {
                     Recursive = true,
                     MediaTypes = new[] { "Video" },
@@ -236,7 +334,7 @@ namespace Emby.Subremover.ScheduledTasks
                 var ids = folders.Select(f => long.TryParse(f.ItemId, out var id) ? id : 0).Where(id => id != 0).ToArray();
                 if (ids.Length > 0)
                 {
-                    items = _libraryManager.GetItemList(new InternalItemsQuery
+                    items = libraryManager.GetItemList(new InternalItemsQuery
                     {
                         Recursive = true,
                         MediaTypes = new[] { "Video" },
@@ -282,12 +380,41 @@ namespace Emby.Subremover.ScheduledTasks
                       (moves.Count > 10 ? $"\n    and {moves.Count - 10} more" : ""));
         }
 
+        // "Remove ads from subtitle files": the .srt files of the videos this run checked, only those new or changed since
+        // they were last checked. Test mode only logs what would go.
+        private void RemoveSubtitleAds(PluginOptions options, SubremoverState state, IEnumerable<string> videos, CancellationToken ct)
+        {
+            var rules = options.AdRules();
+            foreach (var problem in rules.Problems) _log.Warn($"SubRemover: 'Text to remove' (subtitle files): {problem}");
+            var files = new SubtitleAdFiles(rules, options.DryRun, options.BackupMode, options.BackupFolder, _log);
+            files.Begin(state);
+            var looked = 0;
+            foreach (var video in videos)
+            {
+                ct.ThrowIfCancellationRequested();
+                List<string> srts;
+                try { srts = SubtitleAdFiles.FilesFor(video); }
+                catch (Exception ex) { _log.Debug($"SubRemover: couldn't list the subtitle files of {video}: {ex.Message}"); continue; }
+                foreach (var srt in srts.Where(s => files.NeedsCheck(s, state)))
+                {
+                    looked++;
+                    files.Clean(srt, video, state);
+                }
+            }
+            if (looked > 0 || files.Failed > 0)
+                _log.Info("SubRemover: ads in subtitle files" + (options.DryRun ? " (test mode)" : "") + ": " + files.Describe());
+            if (!options.DryRun) _store.Save(state);
+        }
+
         private void CleanOldBackups(PluginOptions options, SubremoverState state)
         {
-            if (options.BackupRetentionDays <= 0) return;
+            // Subtitle-file backups (ads removed) have their own, usually longer, time: they're tiny.
+            int DaysFor(BackupEntry b) => SubtitleAdFiles.IsSubtitleBackup(b) ? options.SubtitleBackupRetentionDays : options.BackupRetentionDays;
+            var now = DateTime.UtcNow;
+            var old = state.Backups.Where(b => DaysFor(b) > 0 && b.CreatedUtc < now.AddDays(-DaysFor(b))).ToList();
+            if (old.Count == 0) return;
 
-            var cutoff = DateTime.UtcNow.AddDays(-options.BackupRetentionDays);
-            foreach (var entry in state.Backups.Where(b => b.CreatedUtc < cutoff).ToList())
+            foreach (var entry in old)
             {
                 if (options.DryRun)
                 {
@@ -298,7 +425,7 @@ namespace Emby.Subremover.ScheduledTasks
                 {
                     if (File.Exists(entry.BackupPath)) File.Delete(entry.BackupPath);
                     state.Backups.Remove(entry);
-                    _log.Info("SubRemover: deleted backup older than {0} days: {1}", options.BackupRetentionDays, entry.BackupPath);
+                    _log.Info("SubRemover: deleted backup older than {0} days: {1}", DaysFor(entry), entry.BackupPath);
                 }
                 catch (Exception ex)
                 {

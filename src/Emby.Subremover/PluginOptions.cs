@@ -8,6 +8,12 @@ using MediaBrowser.Model.Attributes;
 
 namespace Emby.Subremover
 {
+    public enum WrongLanguageTags
+    {
+        LeaveThem,
+        FixTheTag
+    }
+
     public enum ExistingOcrFile
     {
         KeepExisting,
@@ -60,6 +66,24 @@ namespace Emby.Subremover
         [Description("The video is never changed; guesses only name extracted files.")]
         [VisibleCondition(nameof(GuessLanguages), SimpleCondition.IsTrue)]
         public bool GuessForFilesOnly { get; set; }
+
+        [DisplayName("Subtitles tagged with the wrong language")]
+        [Description("When a subtitle's text clearly isn't its tagged language: leave the tag, or fix it.")]
+        public WrongLanguageTags WrongLanguageTags { get; set; }
+
+        [DisplayName("...remove the ones whose real language can't be told")]
+        [Description("Off: they get no language and follow \"Keep subtitles with no language set\".")]
+        [VisibleCondition(nameof(WrongLanguageTags), ValueCondition.IsEqual, WrongLanguageTags.FixTheTag)]
+        public bool RemoveWrongTagsLeftUndefined { get; set; }
+
+        [DisplayName("...check every text subtitle, not only tags two or more tracks share")]
+        [Description("Also catches a lone mistagged track. Reads a little of each video.")]
+        [VisibleCondition(nameof(WrongLanguageTags), ValueCondition.IsEqual, WrongLanguageTags.FixTheTag)]
+        public bool CheckEveryTextSubtitle { get; set; }
+
+        /// <summary>Which settings update this file has had (see OptionsStore.Upgrade); not shown.</summary>
+        [Browsable(false)]
+        public int OptionsVersion { get; set; }
 
         [DisplayName("Keep forced subtitles in any language")]
         [Description("Foreign-lines-only subtitles stay in every language.")]
@@ -115,6 +139,34 @@ namespace Emby.Subremover
         [Description("Leaves a language to a subtitle file that's already there.")]
         public bool PreferExistingFiles { get; set; }
 
+        [DisplayName("Download hash-matched subtitles before changing a video")]
+        [Description("Changing a video changes its hash; first asks Emby's subtitle downloaders for perfect matches. Also used by AudioRemover.")]
+        public bool DownloadHashMatchedSubtitles { get; set; } = true;
+
+        [DisplayName("...at most this many downloads a day")]
+        [Description("0 = no limit. Leaves the rest of the provider's daily allowance (OpenSubtitles: 20 on a free account) for Emby. A video over the limit is left unchanged until the next day.")]
+        [VisibleCondition(nameof(DownloadHashMatchedSubtitles), SimpleCondition.IsTrue)]
+        [MinValue(0)]
+        [MaxValue(10000)]
+        public int HashDownloadsPerDay { get; set; } = 10;
+
+        [DisplayName("Remove ads from subtitle files")]
+        [Description("Takes ad lines like \"Support us and become VIP member\" out of the .srt files next to your videos, during runs. Each changed file is backed up first.")]
+        public bool RemoveSubtitleAds { get; set; }
+
+        [DisplayName("Text to remove")]
+        [Description("One per line. A subtitle line with any of these goes, with the rest of its cue. /…/: a regular expression. Anything else: that word or phrase.")]
+        [EditMultiline(10)]
+        public string SubtitleAdText { get; set; } = SubtitleAdRules.DefaultList;
+
+        [DisplayName("...also remove \"Subtitles by\" and \"Synced by\" credits")]
+        [Description("Lines that start like \"Subtitles by…\", \"Sync and corrections by…\" or \"Ripped by…\".")]
+        public bool RemoveSubtitleCredits { get; set; } = true;
+
+        [DisplayName("...also remove TV captioning credits")]
+        [Description("\"Captioned by Media Access Group at WGBH\", \"Captioning sponsored by…\". Off: they stay.")]
+        public bool RemoveCaptionCredits { get; set; }
+
         [DisplayName("Backup of the original file")]
         [Description("Where the original goes before a video is changed.")]
         public BackupMode BackupMode { get; set; } = BackupMode.NextToOriginal;
@@ -125,10 +177,18 @@ namespace Emby.Subremover
         public string BackupFolder { get; set; } = string.Empty;
 
         [DisplayName("Delete backups older than (days)")]
-        [Description("0 keeps them forever.")]
+        [Description("The backups of original videos made before SubRemover changed them ('movie.mkv.subremover.bak', or the copy in the backup folder). Once deleted, that video can't be restored. 0 keeps them forever.")]
         [MinValue(0)]
         [MaxValue(3650)]
         public int BackupRetentionDays { get; set; }
+
+        [DisplayName("Delete subtitle file backups older than (days)")]
+        [Description("Backups of .srt files that had ads taken out. They're tiny. 0 keeps them forever.")]
+        [MinValue(0)]
+        [MaxValue(36500)]
+        public int SubtitleBackupRetentionDays { get; set; }
+
+        internal SubtitleAdRules AdRules() => new SubtitleAdRules(SubtitleAdText, RemoveSubtitleCredits, RemoveCaptionCredits);
 
         [DisplayName("Max videos to change per run")]
         [Description("0 = no limit. Use 1–5 while testing.")]
@@ -143,6 +203,21 @@ namespace Emby.Subremover
         [DisplayName("Process new videos as they're added")]
         [Description("Checks videos Emby adds, a few minutes after they arrive.")]
         public bool ProcessNewVideos { get; set; }
+
+        [DisplayName("Videos to check at once")]
+        [Description("1–8. Checking runs side by side at low priority; changing videos stays one at a time.")]
+        [MinValue(1)]
+        [MaxValue(8)]
+        public int VideosAtOnce { get; set; } = 4;
+
+        [DisplayName("Continue an interrupted run where it stopped")]
+        [Description("A run that was stopped, or cut off by an Emby restart, skips the videos it already checked.")]
+        public bool ResumeInterruptedRuns { get; set; } = true;
+
+        [DisplayName("...start it again when Emby starts")]
+        [Description("Picks the interrupted run up a few minutes after Emby starts.")]
+        [VisibleCondition(nameof(ResumeInterruptedRuns), SimpleCondition.IsTrue)]
+        public bool ResumeAfterRestart { get; set; } = true;
 
         [DisplayName("Show in the server sidebar menu")]
         [Description("Also lists SubRemover in the server sidebar.")]

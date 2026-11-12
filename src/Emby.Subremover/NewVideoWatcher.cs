@@ -28,19 +28,59 @@ namespace Emby.Subremover
         private readonly object _timerLock = new object();
         private Timer _timer;
 
-        public NewVideoWatcher(ILibraryManager libraryManager, ITaskManager taskManager, ILogManager logManager)
+        /// <summary>How long after Emby starts an interrupted run is picked up again: Emby is busy starting up before that.</summary>
+        public static readonly TimeSpan ResumeAfterStart = TimeSpan.FromMinutes(3);
+
+        private readonly CheckpointStore _checkpoints;
+        private Timer _resumeTimer;
+
+        public NewVideoWatcher(ILibraryManager libraryManager, ITaskManager taskManager, ILogManager logManager,
+            MediaBrowser.Common.Configuration.IApplicationPaths appPaths, MediaBrowser.Model.Serialization.IJsonSerializer json)
         {
             _libraryManager = libraryManager;
             _taskManager = taskManager;
             _log = logManager.GetLogger("SubRemover");
+            _checkpoints = new CheckpointStore(appPaths.PluginConfigurationsPath, json);
         }
 
-        public void Run() => _libraryManager.ItemAdded += OnItemAdded;
+        // "...start it again when Emby starts": a run cut off by a restart left its progress behind.
+        private void ResumeInterruptedRun()
+        {
+            try
+            {
+                var options = Plugin.Instance?.Options;
+                if (options == null || !options.ResumeInterruptedRuns || !options.ResumeAfterRestart || !_checkpoints.Exists) return;
+                _log.Info($"SubRemover: a run was interrupted; it continues in {ResumeAfterStart.TotalMinutes:0} minutes");
+                _resumeTimer = new Timer(_ =>
+                {
+                    try
+                    {
+                        var busy = _taskManager.ScheduledTasks.Any(w => w.ScheduledTask is RemoveSubtitlesTask && w.State != TaskState.Idle);
+                        if (!busy && _checkpoints.Exists) _taskManager.QueueIfNotRunning<RemoveSubtitlesTask>();
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.ErrorException("SubRemover: couldn't continue the interrupted run", ex);
+                    }
+                }, null, ResumeAfterStart, Timeout.InfiniteTimeSpan);
+            }
+            catch (Exception ex)
+            {
+                _log.ErrorException("SubRemover: couldn't check for an interrupted run", ex);
+            }
+        }
+
+        public void Run()
+        {
+            _libraryManager.ItemAdded += OnItemAdded;
+            ResumeInterruptedRun();
+        }
 
         public void Dispose()
         {
             _libraryManager.ItemAdded -= OnItemAdded;
             lock (_timerLock) _timer?.Dispose();
+            _resumeTimer?.Dispose();
         }
 
         // A video SubRemover rewrites keeps its path, so Emby updates it rather than adding it: no loop.

@@ -104,9 +104,9 @@ public class MovedVideosTests
         var newFolder = Path.GetDirectoryName(NewMovie)!;
         var state = new SubremoverState();
         state.Processed[OldMovie] = Stamp;
-        state.MadeFiles.Add(Path.Combine(oldFolder, "My Movie (2020).eng.srt"));
-        state.MadeFiles.Add(Path.Combine(oldFolder, "My Movie (2020).pgs.eng.srt"));
-        state.MadeFiles.Add(Path.Combine(oldFolder, "Other Movie.eng.srt"));
+        state.MadeFileSet().Add(Path.Combine(oldFolder, "My Movie (2020).eng.srt"));
+        state.MadeFileSet().Add(Path.Combine(oldFolder, "My Movie (2020).pgs.eng.srt"));
+        state.MadeFileSet().Add(Path.Combine(oldFolder, "Other Movie.eng.srt"));
         state.OcrFiles[Path.Combine(oldFolder, "My Movie (2020).pgs.eng.srt")] = OcrVersion.Record(OcrModels.Both);
 
         Reconnect(state, new[] { NewMovie });
@@ -115,10 +115,10 @@ public class MovedVideosTests
         Assert.True(state.OcrFileIsCurrent(Path.Combine(newFolder, "My Movie (2020).pgs.eng.srt"), OcrModels.Both));
         Assert.Single(state.OcrFiles);
 
-        Assert.Contains(Path.Combine(newFolder, "My Movie (2020).eng.srt"), state.MadeFiles);
-        Assert.Contains(Path.Combine(newFolder, "My Movie (2020).pgs.eng.srt"), state.MadeFiles);
-        Assert.Contains(Path.Combine(oldFolder, "Other Movie.eng.srt"), state.MadeFiles);
-        Assert.Equal(3, state.MadeFiles.Count);
+        Assert.Contains(Path.Combine(newFolder, "My Movie (2020).eng.srt"), state.MadeFileSet());
+        Assert.Contains(Path.Combine(newFolder, "My Movie (2020).pgs.eng.srt"), state.MadeFileSet());
+        Assert.Contains(Path.Combine(oldFolder, "Other Movie.eng.srt"), state.MadeFileSet());
+        Assert.Equal(3, state.MadeFileSet().Count);
     }
 
     [Fact]

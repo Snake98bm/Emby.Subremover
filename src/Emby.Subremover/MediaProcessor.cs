@@ -35,13 +35,16 @@ namespace Emby.Subremover
         private readonly ILogger _log;
         private readonly Tessdata _tessdata;
         private readonly SearchOcrStore _searchOcr;
+        private readonly HashMatchedSubtitles _hashSubtitles;
 
         /// <summary>What this processor did (or would do in test mode) so far; one processor is made per run.</summary>
         public RunTotals Totals { get; } = new RunTotals();
 
         public MediaProcessor(FfmpegRunner runner, ILibraryMonitor libraryMonitor, IProviderManager providerManager,
-            IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata, SearchOcrStore searchOcr = null)
+            IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata, SearchOcrStore searchOcr = null,
+            Func<ILogger, HashMatchedSubtitles> hashSubtitles = null)
         {
+            _hashSubtitles = hashSubtitles?.Invoke(log);
             _tessdata = tessdata;
             _searchOcr = searchOcr;
             _runner = runner;
@@ -68,61 +71,122 @@ namespace Emby.Subremover
             MarkDefaultInName = o.MarkDefaultInName,
             GuessLanguages = o.GuessLanguages,
             GuessForFilesOnly = o.GuessLanguages && o.GuessForFilesOnly,
+            FixWrongTags = o.WrongLanguageTags == WrongLanguageTags.FixTheTag,
+            RemoveUnknownWrongTags = o.WrongLanguageTags == WrongLanguageTags.FixTheTag && o.RemoveWrongTagsLeftUndefined,
+            CheckEveryTextSubtitle = o.WrongLanguageTags == WrongLanguageTags.FixTheTag && o.CheckEveryTextSubtitle,
             PreferExistingFiles = o.PreferExistingFiles,
             DefaultLanguage = string.IsNullOrWhiteSpace(o.DefaultLanguage) ? null : Languages.Normalize(o.DefaultLanguage)
         };
 
+        /// <summary>Checks and, when needed, changes one video.</summary>
         public async Task<Outcome> Process(BaseItem item, PluginOptions options, SubremoverState state, StateStore store, CancellationToken ct)
         {
+            var video = await Check(item, options, state, store, ct).ConfigureAwait(false);
+            return await Change(video, options, state, store, ct).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Reads a video and decides what to do with it. Several videos may be checked at once: it only reads the shared
+        /// state, under its lock (a video with nothing to do is noted as done).
+        /// </summary>
+        public async Task<Checked> Check(BaseItem item, PluginOptions options, SubremoverState state, StateStore store, CancellationToken ct)
+        {
             var path = item.Path;
-            if (state.IsRestored(path))
+            bool restored;
+            lock (state) restored = state.IsRestored(path);
+            if (restored)
             {
                 _log.Debug("SubRemover: {0} was restored from its backup, leaving it alone", path);
-                return Outcome.AlreadyDone;
+                return Checked.Finished(Outcome.AlreadyDone);
             }
 
             var stamp = FileStamp.Of(path);
-            if (state.Processed.TryGetValue(path, out var done) && done.Matches(stamp)) return Outcome.AlreadyDone;
+            bool alreadyDone;
+            lock (state) alreadyDone = state.Processed.TryGetValue(path, out var done) && done.Matches(stamp);
+            if (alreadyDone) return Checked.Finished(Outcome.AlreadyDone);
 
             var before = await Probe(path, ct).ConfigureAwait(false);
-            if (before == null) return Outcome.Failed;
+            if (before == null) return Checked.Finished(Outcome.Failed);
 
             // A guess only for file names is no use when nothing is extracted, and reading the video costs time.
             var settings = SettingsFrom(options);
-            if (options.GuessLanguages && (!options.GuessForFilesOnly || options.ExtractTextSubtitles))
-                await GuessLanguages(path, before, settings, options.GuessForFilesOnly, ct).ConfigureAwait(false);
+            var rules = new GuessRules
+            {
+                GuessUntagged = options.GuessLanguages && (!options.GuessForFilesOnly || options.ExtractTextSubtitles),
+                UntaggedFilesOnly = options.GuessForFilesOnly,
+                FixWrongTags = settings.FixWrongTags,
+                RemoveUnknownWrongTags = settings.RemoveUnknownWrongTags,
+                CheckEveryTextSubtitle = settings.CheckEveryTextSubtitle
+            };
+            if (rules.GuessUntagged || rules.FixWrongTags)
+                await GuessLanguages(path, before, settings, rules, ct).ConfigureAwait(false);
 
-            var existing = options.PreferExistingFiles ? ExistingSubtitles.Find(path, state.MadeFiles) : null;
             var redoOlder = options.OcrExistingFile == ExistingOcrFile.RedoIfMadeByAnOlderOcr && _searchOcr != null;
             var searchRecords = redoOlder ? _searchOcr.Load() : new System.Collections.Generic.List<SearchOcrRecord>();
             // Current if a run made it with today's OCR, or the subtitle search saved today's OCR into it.
             bool OcrFileIsCurrent(string f) =>
                 state.OcrFileIsCurrent(f, options.OcrModel)
                 || searchRecords.Any(r => string.Equals(r.FilePath, f, StringComparison.OrdinalIgnoreCase) && OcrVersion.IsCurrent(r, options.OcrModel));
-            var plan = SubtitlePlanner.Plan(before, settings, path, existing, OcrFileIsCurrent);
+            SubtitlePlan MakePlan()
+            {
+                SubtitlePlan made;
+                lock (state)
+                {
+                    var existing = options.PreferExistingFiles ? ExistingSubtitles.Find(path, state.MadeFileSet()) : null;
+                    made = SubtitlePlanner.Plan(before, settings, path, existing, OcrFileIsCurrent);
+                }
 
-            // Files Emby saved from the subtitle search, made by an older OCR: redone in place, like our own OCR files.
-            if (redoOlder)
-                plan.Ocr.AddRange(SearchOcrRedo.Jobs(path, before, searchRecords, options.OcrModel)
-                    .Where(j => !plan.Ocr.Any(o => string.Equals(o.OutputPath, j.OutputPath, StringComparison.OrdinalIgnoreCase))));
+                // Files Emby saved from the subtitle search, made by an older OCR: redone in place, like our own OCR files.
+                if (redoOlder)
+                    made.Ocr.AddRange(SearchOcrRedo.Jobs(path, before, searchRecords, options.OcrModel)
+                        .Where(j => !made.Ocr.Any(o => string.Equals(o.OutputPath, j.OutputPath, StringComparison.OrdinalIgnoreCase))));
+                return made;
+            }
+            var plan = MakePlan();
+
+            // The video is about to be rewritten: the last chance for a perfect (hash) match. A download is planned with.
+            if (plan.NeedsRemux && options.DownloadHashMatchedSubtitles && _hashSubtitles != null && IsOriginal(path, state)
+                && !_hashSubtitles.AlreadyChecked(path))
+            {
+                var languages = HashMatchedSubtitles.LanguagesToSearch(settings.KeepLanguages,
+                    before.streams.Where(s => s.IsSubtitle && SubtitlePlanner.IsTextCodec(s.codec_name)).Select(s => s.Language),
+                    ExistingSubtitles.Find(path, new string[0]).Keys);
+                var lookup = await _hashSubtitles.Lookup(item, languages, options.DryRun ? HashMode.LogOnly : HashMode.Download, ct, options.HashDownloadsPerDay).ConfigureAwait(false);
+                if (lookup.Check == HashCheck.TryLater) return Checked.Finished(Outcome.NothingToDo);
+                if (lookup.Downloaded.Count > 0) plan = MakePlan();
+            }
 
             if (!plan.HasWork)
             {
                 _log.Debug("SubRemover: nothing to do for {0}", path);
                 if (!options.DryRun)
                 {
-                    state.Processed[path] = stamp;
-                    store.Save(state);
+                    lock (state)
+                    {
+                        state.Processed[path] = stamp;
+                        store.Save(state);
+                    }
                 }
-                return Outcome.NothingToDo;
+                return Checked.Finished(Outcome.NothingToDo);
             }
 
             LogPlan(path, plan, options.DryRun);
             if (options.DryRun)
             {
-                Totals.AddPlan(plan);
-                return Outcome.WouldChange;
+                lock (Totals) Totals.AddPlan(plan);
+                return Checked.Finished(Outcome.WouldChange);
             }
+            return new Checked { Item = item, Path = path, Before = before, Plan = plan };
+        }
+
+        /// <summary>
+        /// Changes a checked video: extract, OCR, rewrite. One video at a time (the run calls it in turn), while the next
+        /// videos are being checked.
+        /// </summary>
+        public async Task<Outcome> Change(Checked video, PluginOptions options, SubremoverState state, StateStore store, CancellationToken ct)
+        {
+            if (video.Outcome != null) return video.Outcome.Value;
+            var path = video.Path;
 
             // AudioRemover rewrites videos the same way; two rewrites of one file at once would lose one of them.
             if (OtherToolIsWorkingOn(path))
@@ -131,19 +195,37 @@ namespace Emby.Subremover
                 return Outcome.NothingToDo;
             }
 
-            state.InProgress = path;
-            store.Save(state);
+            lock (state)
+            {
+                state.InProgress = path;
+                store.Save(state);
+            }
             try
             {
-                return await Apply(item, path, before, plan, options, state, store, ct).ConfigureAwait(false);
+                return await Apply(video.Item, path, video.Before, video.Plan, options, state, store, ct).ConfigureAwait(false);
             }
             finally
             {
                 // Catches temp files from any step that was cancelled or failed part-way.
                 foreach (var file in Leftovers.Clean(path)) _log.Debug("SubRemover: deleted leftover {0}", file);
-                state.InProgress = null;
-                store.Save(state);
+                lock (state)
+                {
+                    state.InProgress = null;
+                    store.Save(state);
+                }
             }
+        }
+
+        /// <summary>What checking a video found: either the outcome already, or the plan to apply.</summary>
+        public sealed class Checked
+        {
+            public Outcome? Outcome { get; set; }
+            public BaseItem Item { get; set; }
+            public string Path { get; set; }
+            public ProbeResult Before { get; set; }
+            public SubtitlePlan Plan { get; set; }
+
+            public static Checked Finished(Outcome outcome) => new Checked { Outcome = outcome };
         }
 
         /// <summary>
@@ -156,6 +238,19 @@ namespace Emby.Subremover
             return temp.Exists && (nowUtc ?? DateTime.UtcNow) - temp.LastWriteTimeUtc < TimeSpan.FromMinutes(10);
         }
 
+        /// <summary>
+        /// Not yet rewritten by SubRemover (no backup of it) or AudioRemover (no backup beside it): its hash is still the
+        /// one subtitle sites know. Videos changed before hashes were kept are passed over.
+        /// </summary>
+        private static bool IsOriginal(string path, SubremoverState state)
+        {
+            lock (state)
+            {
+                if (state.Backups.Any(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase))) return false;
+            }
+            return !File.Exists(path + ".audioremover.bak");
+        }
+
         private async Task<Outcome> Apply(BaseItem item, string path, ProbeResult before, SubtitlePlan plan, PluginOptions options,
             SubremoverState state, StateStore store, CancellationToken ct)
         {
@@ -163,10 +258,14 @@ namespace Emby.Subremover
             var made = new List<MadeFile>();
             foreach (var job in plan.Extract)
             {
-                var extracted = await Extract(path, job, before.FrameCountsAreCurrent, state.MadeFiles, ct).ConfigureAwait(false);
+                var extracted = await Extract(path, job, before.FrameCountsAreCurrent, state.MadeFileSet(), ct).ConfigureAwait(false);
                 if (extracted == ExtractOutcome.Failed) return Outcome.Failed;
                 if (extracted == ExtractOutcome.KeepTrackInVideo && plan.Remove.Remove(job.Stream)) plan.Keep.Add(job.Stream);
-                if (extracted == ExtractOutcome.Done) made.Add(new MadeFile { Path = job.OutputPath });
+                if (extracted == ExtractOutcome.Done)
+                {
+                    made.Add(new MadeFile { Path = job.OutputPath });
+                    lock (state) state.MadeFileSet().Add(job.OutputPath);
+                }
             }
 
             // OCR before the remux: the stream indexes in the plan belong to the original file.
@@ -178,7 +277,7 @@ namespace Emby.Subremover
                 if (problem == null)
                 {
                     _log.Info("SubRemover: OCR {0} -> {1}", job.Stream.Describe(), job.OutputPath);
-                    Totals.AddOcr(job.OutputPath);
+                    lock (Totals) Totals.AddOcr(job.OutputPath);
                     made.Add(new MadeFile { Path = job.OutputPath, Ocr = true });
                     if (job.SearchRecord != null)
                     {
@@ -198,15 +297,18 @@ namespace Emby.Subremover
                     }
                     else
                     {
-                        state.MadeFiles.Add(job.OutputPath);
-                        state.OcrFiles[job.OutputPath] = OcrVersion.Record(job.Models);
+                        lock (state)
+                        {
+                            state.MadeFileSet().Add(job.OutputPath);
+                            state.OcrFiles[job.OutputPath] = OcrVersion.Record(job.Models);
+                        }
                     }
                 }
                 else
                 {
                     _log.Warn("SubRemover: OCR of {0} in {1} failed: {2}. Will retry next run.", job.Stream.Describe(), path, problem);
                     ocrFailed = true;
-                    Totals.OcrFailed++;
+                    lock (Totals) Totals.OcrFailed++;
                 }
             }
 
@@ -214,13 +316,16 @@ namespace Emby.Subremover
             {
                 var notes = BackupNotes.Describe(path, plan, made, options.OcrModel);
                 if (!await RemuxAndSwap(path, before, plan, options, state, notes, ct).ConfigureAwait(false)) return Outcome.Failed;
-                Totals.AddRemux(plan);
+                lock (Totals) Totals.AddRemux(plan);
             }
 
             if (!ocrFailed)
             {
-                state.Processed[path] = FileStamp.Of(path);
-                store.Save(state);
+                lock (state)
+                {
+                    state.Processed[path] = FileStamp.Of(path);
+                    store.Save(state);
+                }
             }
 
             _providerManager.QueueRefresh(item.InternalId, new MetadataRefreshOptions(_fileSystem)
@@ -232,32 +337,36 @@ namespace Emby.Subremover
             return ocrFailed ? Outcome.Failed : Outcome.Changed;
         }
 
-        private async Task GuessLanguages(string path, ProbeResult probe, PlannerSettings settings, bool filesOnly, CancellationToken ct)
+        private async Task GuessLanguages(string path, ProbeResult probe, PlannerSettings settings, GuessRules rules, CancellationToken ct)
         {
-            var readings = await SubtitleLanguageGuessing.Run(_runner, path, probe, ct, filesOnly, s => SubtitlePlanner.MightKeep(s, settings))
+            var readings = await SubtitleLanguageGuessing.Run(_runner, path, probe, ct, rules, s => SubtitlePlanner.MightKeep(s, settings))
                 .ConfigureAwait(false);
             foreach (var r in readings)
             {
                 var guess = r.Guess;
                 var sdh = guess.SdhReason != null ? $"; looks like SDH ({guess.SdhReason})" : "";
-                var onlyFiles = filesOnly ? ". Only used to name its extracted file; the track stays as it is" : "";
-                if (guess.SdhReason != null) Totals.SdhSpotted++;
+                var onlyFiles = rules.UntaggedFilesOnly ? ". Only used to name its extracted file; the track stays as it is" : "";
+                var wrongTagOutcome = !rules.FixWrongTags
+                    ? ". Left as tagged (Subtitles tagged with the wrong language: Leave them); only used to name its extracted file"
+                    : guess.Language != null ? ". The tag is fixed" : r.Stream.RemoveAsWrongTag ? ". It gets no language and is removed" : ", so it gets no language";
+                if (guess.SdhReason != null) lock (Totals) Totals.SdhSpotted++;
                 // One pre-built strings: paths may contain braces.
                 if (r.Tag == "und")
                 {
-                    if (guess.Language != null) Totals.LanguagesGuessed++;
+                    if (guess.Language != null) lock (Totals) Totals.LanguagesGuessed++;
                     _log.Info(guess.Language != null
                         ? $"SubRemover: {path} track #{r.Stream.index} has no language set; guessed {Languages.NameOf(guess.Language)} ({guess.Reason}){sdh}{onlyFiles}"
                         : $"SubRemover: {path} track #{r.Stream.index} has no language set and stays that way: {guess.Reason}{sdh}");
                 }
                 else if (r.WrongTag)
                 {
-                    Totals.WrongTags++;
+                    lock (Totals) Totals.WrongTags++;
+                    if (rules.FixWrongTags) lock (Totals) Totals.WrongTagsFixed++;
                     _log.Info(guess.Language != null
-                        ? $"SubRemover: {path} track #{r.Stream.index} is tagged {Languages.NameOf(r.Tag)} but reads as {Languages.NameOf(guess.Language)} ({guess.Reason}){sdh}{onlyFiles}"
+                        ? $"SubRemover: {path} track #{r.Stream.index} is tagged {Languages.NameOf(r.Tag)} but reads as {Languages.NameOf(guess.Language)} ({guess.Reason}){sdh}{wrongTagOutcome}"
                         : $"SubRemover: {path} track #{r.Stream.index} is tagged {Languages.NameOf(r.Tag)} but its text isn't {Languages.NameOf(r.Tag)} " +
                           $"({guess.Hits[r.Tag]} of {guess.Words} words are common {Languages.NameOf(r.Tag)} words); its language is unknown{sdh}" +
-                          (filesOnly ? ". It gets no extracted file; the track stays as it is" : ", so it counts as having no language"));
+                          (rules.FixWrongTags ? wrongTagOutcome : ". Left as tagged (Subtitles tagged with the wrong language: Leave them); it gets no extracted file"));
                 }
                 else if (guess.SdhReason != null)
                 {
@@ -346,8 +455,7 @@ namespace Emby.Subremover
             {
                 File.Move(temp, job.OutputPath);
                 _log.Info("SubRemover: extracted {0} -> {1}", job.Stream.Describe(), job.OutputPath);
-                Totals.AddExtracted(job.OutputPath);
-                madeFiles.Add(job.OutputPath);
+                lock (Totals) Totals.AddExtracted(job.OutputPath);
                 return ExtractOutcome.Done;
             }
 
@@ -419,16 +527,19 @@ namespace Emby.Subremover
             }
 
             if (result.Message != null) _log.Debug("SubRemover: {0}: {1}", path, result.Message);
-            if (result.NewBackup != null)
+            lock (state)
             {
-                result.NewBackup.Changes = notes;
-                state.Backups.Add(result.NewBackup);
-            }
-            else if (result.BackupPath != null)
-            {
-                // The backup from an earlier run is still the original: it now undoes this run's changes too.
-                var earlier = state.Backups.LastOrDefault(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase));
-                if (earlier?.Changes != null) earlier.Changes = earlier.Changes.Concat(notes ?? new List<string>()).Distinct().ToList();
+                if (result.NewBackup != null)
+                {
+                    result.NewBackup.Changes = notes;
+                    state.Backups.Add(result.NewBackup);
+                }
+                else if (result.BackupPath != null)
+                {
+                    // The backup from an earlier run is still the original: it now undoes this run's changes too.
+                    var earlier = state.Backups.LastOrDefault(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase));
+                    if (earlier?.Changes != null) earlier.Changes = earlier.Changes.Concat(notes ?? new List<string>()).Distinct().ToList();
+                }
             }
             _log.Info("SubRemover: updated {0}{1}", path, result.BackupPath != null ? " (backup: " + result.BackupPath + ")" : " (no backup kept)");
             return true;

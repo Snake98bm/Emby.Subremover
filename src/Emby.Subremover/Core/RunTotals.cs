@@ -16,7 +16,18 @@ namespace Emby.Subremover.Core
         public int DefaultFiles { get; set; }
         public int LanguagesGuessed { get; set; }
         public int WrongTags { get; set; }
+        public int WrongTagsFixed { get; set; }
         public int SdhSpotted { get; set; }
+
+        public RunTotals Copy() => (RunTotals)MemberwiseClone();
+
+        /// <summary>Picks up the totals of the run this one continues.</summary>
+        public void CopyFrom(RunTotals other)
+        {
+            if (other == null) return;
+            foreach (var p in typeof(RunTotals).GetProperties().Where(p => p.CanWrite && p.PropertyType == typeof(int)))
+                p.SetValue(this, p.GetValue(other));
+        }
 
         /// <summary>Test mode: counts what the plan would do. Extracted files that already exist aren't written again.</summary>
         public void AddPlan(SubtitlePlan plan)
@@ -67,6 +78,7 @@ namespace Emby.Subremover.Core
                 $"files named .default:       {DefaultFiles}",
                 $"subtitle languages guessed: {LanguagesGuessed}",
                 $"wrong language tags found:  {WrongTags}",
+                $"wrong language tags fixed:  {WrongTagsFixed}",
                 $"SDH spotted from the text:  {SdhSpotted}"
             };
             return (dryRun ? "Totals - what a real run would do:" : "Totals:") + "\n    " + string.Join("\n    ", lines);
