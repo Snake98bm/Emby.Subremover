@@ -31,6 +31,9 @@ namespace Emby.Subremover.Core
         /// <summary>Only part of the signature: the guessing itself happens before planning, on the probe.</summary>
         public bool GuessLanguages { get; set; }
         public bool GuessForFilesOnly { get; set; }
+        public bool FixWrongTags { get; set; }
+        public bool RemoveUnknownWrongTags { get; set; }
+        public bool CheckEveryTextSubtitle { get; set; }
         public bool PreferExistingFiles { get; set; }
 
         public static ISet<string> ParseLanguages(string csv) =>
@@ -42,7 +45,8 @@ namespace Emby.Subremover.Core
         /// <summary>Changes whenever a setting that affects the plan changes, so already-checked videos get checked again.</summary>
         public string Signature() => string.Join("|",
             string.Join(",", KeepLanguages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase)),
-            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting, OcrRedoOlder, MakeRegularDefault, MarkDefaultInName, DefaultLanguage, GuessLanguages, GuessForFilesOnly, PreferExistingFiles);
+            KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting, OcrRedoOlder, MakeRegularDefault, MarkDefaultInName, DefaultLanguage, GuessLanguages, GuessForFilesOnly, PreferExistingFiles,
+            FixWrongTags, RemoveUnknownWrongTags, CheckEveryTextSubtitle);
     }
 
     public class ExtractJob
@@ -320,6 +324,7 @@ namespace Emby.Subremover.Core
 
         private static bool KeptByLanguage(ProbeStream s, PlannerSettings settings)
         {
+            if (s.RemoveAsWrongTag) return false;
             if (settings.RemoveCommentary && s.IsCommentary) return false;
             if (settings.KeepLanguages.Contains(s.Language)) return true;
             if (s.Language == "und" && settings.KeepUndefined) return true;

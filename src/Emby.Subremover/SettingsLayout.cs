@@ -5,6 +5,7 @@ using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
+using Emby.Subremover.Core;
 using MediaBrowser.Model.Attributes;
 
 namespace Emby.Subremover
@@ -34,6 +35,8 @@ namespace Emby.Subremover
         internal const string QuickSetupWidget = "quickSetup";
         internal const string RestoreWidget = "restore";
         internal const string LogsWidget = "logs";
+        internal const string HashWidget = "hashSubs";
+        internal const string AdsWidget = "subAds";
 
         internal sealed class TabLayout
         {
@@ -58,7 +61,10 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.MaxItemsPerRun)),
                     F(nameof(PluginOptions.OnlyPathContains)),
                     F(nameof(PluginOptions.ProcessNewVideos)),
+                    F(nameof(PluginOptions.ResumeInterruptedRuns)),
+                    F(nameof(PluginOptions.ResumeAfterRestart)),
                     H("Advanced"),
+                    F(nameof(PluginOptions.VideosAtOnce)),
                     F(nameof(PluginOptions.ShowInSidebar)),
                     F(nameof(PluginOptions.ReprocessAll))
                 }
@@ -73,6 +79,9 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.KeepUndefined)),
                     F(nameof(PluginOptions.GuessLanguages)),
                     F(nameof(PluginOptions.GuessForFilesOnly)),
+                    F(nameof(PluginOptions.WrongLanguageTags)),
+                    F(nameof(PluginOptions.RemoveWrongTagsLeftUndefined)),
+                    F(nameof(PluginOptions.CheckEveryTextSubtitle)),
                     F(nameof(PluginOptions.KeepForcedAnyLanguage)),
                     H("Remove"),
                     F(nameof(PluginOptions.RemoveHearingImpaired)),
@@ -91,6 +100,16 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.RemoveExtractedFromVideo)),
                     F(nameof(PluginOptions.MarkDefaultInName)),
                     F(nameof(PluginOptions.PreferExistingFiles)),
+                    H("Download"),
+                    F(nameof(PluginOptions.DownloadHashMatchedSubtitles)),
+                    F(nameof(PluginOptions.HashDownloadsPerDay)),
+                    W(HashWidget),
+                    H("Ads in subtitle files"),
+                    F(nameof(PluginOptions.RemoveSubtitleAds)),
+                    F(nameof(PluginOptions.SubtitleAdText)),
+                    F(nameof(PluginOptions.RemoveSubtitleCredits)),
+                    F(nameof(PluginOptions.RemoveCaptionCredits)),
+                    W(AdsWidget),
                     H("OCR (experimental)"),
                     F(nameof(PluginOptions.OcrPictureSubtitles)),
                     F(nameof(PluginOptions.OcrExistingFile)),
@@ -106,6 +125,7 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.BackupMode)),
                     F(nameof(PluginOptions.BackupFolder)),
                     F(nameof(PluginOptions.BackupRetentionDays)),
+                    F(nameof(PluginOptions.SubtitleBackupRetentionDays)),
                     H("Restore"),
                     W(RestoreWidget)
                 }
@@ -221,6 +241,9 @@ namespace Emby.Subremover
                 }
                 else p.SetValue(options, text.Trim());
             }
+
+            // An emptied list brings the starting one back (Help, "Text to remove").
+            if (string.IsNullOrWhiteSpace(options.SubtitleAdText)) options.SubtitleAdText = SubtitleAdRules.DefaultList;
 
             // The default can only be a language that's kept.
             if (!string.IsNullOrEmpty(options.DefaultLanguage) &&

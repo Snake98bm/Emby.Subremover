@@ -44,6 +44,32 @@ namespace Emby.Subremover
     {
     }
 
+    [Route("/SubRemover/HashSubtitles", "POST", Summary = "Counts or downloads hash-matched subtitles", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class StartHashSubtitles : IReturn<StatusDto>
+    {
+        public bool CountOnly { get; set; }
+    }
+
+    [Route("/SubRemover/HashSubtitles/Status", "GET", Summary = "The hash-matched subtitles status line", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class GetHashStatus : IReturn<StatusDto>
+    {
+    }
+
+    [Route("/SubRemover/SubtitleAds", "POST", Summary = "Finds or removes ads in subtitle files", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class StartSubtitleAds : IReturn<AdStatusDto>
+    {
+        public bool FindOnly { get; set; }
+    }
+
+    [Route("/SubRemover/SubtitleAds/Status", "GET", Summary = "The subtitle-ads status line and suggestions", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class GetSubtitleAdsStatus : IReturn<AdStatusDto>
+    {
+    }
+
     [Route("/SubRemover/Backups", "GET", Summary = "Videos with a backup, for the restore list", IsHidden = true)]
     [Authenticated(Roles = "Admin")]
     public class GetBackups : IReturn<BackupListDto>
@@ -77,6 +103,8 @@ namespace Emby.Subremover
         public List<OptionDto> Libraries { get; set; }
         public List<OptionDto> Languages { get; set; }
         public StatusDto Status { get; set; }
+        public StatusDto HashStatus { get; set; }
+        public AdStatusDto AdStatus { get; set; }
         public string BackupCount { get; set; }
         public List<string> Logs { get; set; }
     }
@@ -98,6 +126,41 @@ namespace Emby.Subremover
 
         internal static StatusDto From(StatusItem item) =>
             new StatusDto { Caption = item?.Caption, Text = item?.StatusText, State = (item?.Status ?? ItemStatus.None).ToString() };
+    }
+
+    public class AdStatusDto
+    {
+        public StatusDto Status { get; set; }
+
+        /// <summary>What the last Find or Remove suggests adding to "Text to remove".</summary>
+        public List<AdSuggestionDto> Suggestions { get; set; }
+
+        /// <summary>The last Find or Remove's log: its name and a link that opens it in a new window.</summary>
+        public string LogName { get; set; }
+        public string LogUrl { get; set; }
+
+        internal static AdStatusDto Current(Plugin plugin) => new AdStatusDto
+        {
+            Status = StatusDto.From(plugin.AdStatus()),
+            LogName = ScheduledTasks.SubtitleAdsTask.LastLogName,
+            LogUrl = ScheduledTasks.SubtitleAdsTask.LastLogName == null ? null
+                : GetSubremoverLog.Link(ScheduledTasks.SubtitleAdsTask.LastLogName, plugin.LogLinkKey.Current(DateTime.UtcNow), download: false),
+            Suggestions = ScheduledTasks.SubtitleAdsTask.LastSuggestions.Select(s => new AdSuggestionDto
+            {
+                Entry = s.Entry,
+                Titles = s.Titles,
+                Example = s.Example,
+                TitleNames = string.Join(", ", s.TitleNames.Take(8)) + (s.TitleNames.Count > 8 ? $" and {s.TitleNames.Count - 8} more" : "")
+            }).ToList()
+        };
+    }
+
+    public class AdSuggestionDto
+    {
+        public string Entry { get; set; }
+        public int Titles { get; set; }
+        public string Example { get; set; }
+        public string TitleNames { get; set; }
     }
 
     public class BackupListDto
@@ -165,6 +228,8 @@ namespace Emby.Subremover
                 Libraries = plugin.LibraryChoices().Select(c => new OptionDto { Value = c.Value, Name = c.Name }).ToList(),
                 Languages = Plugin.LanguageChoicesFor(options.KeepLanguages).Select(c => new OptionDto { Value = c.Value, Name = c.Name }).ToList(),
                 Status = StatusDto.From(plugin.CurrentStatus()),
+                HashStatus = StatusDto.From(plugin.HashStatus()),
+                AdStatus = AdStatusDto.Current(plugin),
                 BackupCount = plugin.BackupCountText(),
                 Logs = SafeLogList()
             };
@@ -199,6 +264,20 @@ namespace Emby.Subremover
         public object Post(StartRun request) => StatusDto.From(Plugin.RunNow());
 
         public object Get(GetRunStatus request) => StatusDto.From(Plugin.CurrentStatus());
+
+        public object Post(StartHashSubtitles request) => StatusDto.From(Plugin.StartHashRun(request.CountOnly));
+
+        public object Get(GetHashStatus request) => StatusDto.From(Plugin.HashStatus());
+
+        public object Post(StartSubtitleAds request)
+        {
+            var started = Plugin.StartAdRun(request.FindOnly);
+            var dto = AdStatusDto.Current(Plugin);
+            dto.Status = StatusDto.From(started);
+            return dto;
+        }
+
+        public object Get(GetSubtitleAdsStatus request) => AdStatusDto.Current(Plugin);
 
         public object Get(GetBackups request)
         {

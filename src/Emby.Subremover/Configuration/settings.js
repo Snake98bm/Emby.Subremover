@@ -234,7 +234,7 @@ define([], function () {
                 : field.Kind === 'select' ? selectControl(field)
                 : textControl(field);
             // Settings that only show with another one on are set in a little.
-            if (field.VisibleIf && field.VisibleIf.Is === 'IsTrue') node.classList.add('sr-indent');
+            if (field.VisibleIf && (field.VisibleIf.Is === 'IsTrue' || field.VisibleIf.Is === 'IsEqual')) node.classList.add('sr-indent');
             rows[field.Name] = node;
             return node;
         }
@@ -251,6 +251,127 @@ define([], function () {
                 ]),
                 box
             ]);
+        }
+
+        function hashWidget() {
+            var box = h('div', { class: 'sr-status', id: 'srHashStatus', role: 'status' });
+            showStatus(box, page.HashStatus);
+            function start(countOnly) {
+                save().then(function (ok) {
+                    if (!ok) return;
+                    postJson('SubRemover/HashSubtitles', { CountOnly: countOnly }).then(function (s) {
+                        showStatus(el('srHashStatus'), s);
+                        pollHash({ State: 'InProgress' });
+                    }, function (err) {
+                        errorText(err).then(function (t) { showStatus(el('srHashStatus'), { Caption: 'Hash-matched subtitles', Text: 'Could not start: ' + t, State: 'Failed' }); });
+                    });
+                });
+            }
+            return h('div', {}, [
+                h('div', { class: 'sr-buttons' }, [
+                    h('button', { type: 'button', class: 'sr-btn', text: '🔍 Count hash-matched subtitles', onclick: function () { start(true); } }),
+                    h('button', { type: 'button', class: 'sr-btn', text: '⬇ Download hash-matched subtitles', onclick: function () { start(false); } })
+                ]),
+                h('div', { class: 'sr-muted', text: 'Goes through your libraries without changing any video. Count only asks the downloaders and downloads nothing. Run Download before SubRemover or AudioRemover change your videos.' }),
+                box
+            ]);
+        }
+
+        var hashTimer;
+        function pollHash(status) {
+            clearTimeout(hashTimer);
+            if (!status || status.State !== 'InProgress') return;
+            hashTimer = setTimeout(function () {
+                getJson('SubRemover/HashSubtitles/Status').then(function (s) {
+                    var box = el('srHashStatus');
+                    if (box) showStatus(box, s);
+                    pollHash(s);
+                }, function () { pollHash(status); });
+            }, 4000);
+        }
+
+        // "Ads in subtitle files": Find / Remove now, and the suggestions the last one found for "Text to remove".
+        function adsWidget() {
+            var box = h('div', { class: 'sr-status', id: 'srAdStatus', role: 'status' });
+            var list = h('div', { id: 'srAdSuggestions' });
+            var logLink = h('a', { class: 'sr-btn', id: 'srAdLog', target: '_blank', rel: 'noopener', text: '📄 Open the log ↗', style: 'display:none' });
+            function start(findOnly) {
+                if (!findOnly && !window.confirm('Remove the ads from every .srt file next to the videos in your libraries? Each changed file is backed up first.')) return;
+                save().then(function (ok) {
+                    if (!ok) return;
+                    postJson('SubRemover/SubtitleAds', { FindOnly: findOnly }).then(function (r) {
+                        showAds(r);
+                        pollAds({ State: 'InProgress' });
+                    }, function (err) {
+                        errorText(err).then(function (t) { showStatus(el('srAdStatus'), { Caption: 'Ads in subtitle files', Text: 'Could not start: ' + t, State: 'Failed' }); });
+                    });
+                });
+            }
+            setTimeout(function () { showAds(page.AdStatus); }, 0);
+            return h('div', {}, [
+                h('div', { class: 'sr-buttons' }, [
+                    h('button', { type: 'button', class: 'sr-btn', text: '🧪 Test run (changes nothing)', onclick: function () { start(true); } }),
+                    h('button', { type: 'button', class: 'sr-btn', text: '🧹 Remove ads now', onclick: function () { start(false); } }),
+                    logLink
+                ]),
+                h('div', { class: 'sr-muted', text: 'Every .srt file next to the videos in your libraries. Test run only lists what would go, file by file and line by line, in its log; Remove takes it out and backs each file up. No video is changed.' }),
+                box,
+                list
+            ]);
+        }
+
+        function showAds(r) {
+            var box = el('srAdStatus');
+            var list = el('srAdSuggestions');
+            if (!box || !r) return;
+            showStatus(box, r.Status);
+            var logLink = el('srAdLog');
+            if (logLink) {
+                logLink.style.display = r.LogUrl ? '' : 'none';
+                if (r.LogUrl) logLink.href = r.LogUrl;
+            }
+            list.innerHTML = '';
+            var items = (r.Suggestions || []);
+            var current = (values.SubtitleAdText || '').toLowerCase().split(/\r?\n/).map(function (l) { return l.trim(); });
+            items = items.filter(function (s) { return current.indexOf(s.Entry.toLowerCase()) < 0; });
+            if (!items.length) return;
+            var boxes = [];
+            var table = h('table', { class: 'sr-table' }, [h('tr', {}, [h('th'), h('th', { text: 'Suggested text' }), h('th', { text: 'Found in' })])]);
+            items.forEach(function (s) {
+                var b = h('input', { type: 'checkbox' });
+                b._entry = s.Entry;
+                boxes.push(b);
+                table.appendChild(h('tr', {}, [
+                    h('td', {}, [b]),
+                    h('td', {}, [h('div', { class: 'sr-file', text: s.Entry }), h('div', { class: 'sr-folder', text: 'e.g. "' + s.Example + '"' })]),
+                    h('td', {}, [h('div', { text: s.Titles + ' films or shows' }), h('div', { class: 'sr-folder', text: s.TitleNames })])
+                ]));
+            });
+            var add = h('button', { type: 'button', class: 'sr-btn', text: 'Add ticked to the list', onclick: function () {
+                var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b._entry; });
+                if (!picked.length) return;
+                var text = (values.SubtitleAdText || '').replace(/\s+$/, '');
+                setValue('SubtitleAdText', (text ? text + '\n' : '') + picked.join('\n'));
+                if (redraw.SubtitleAdText) redraw.SubtitleAdText();
+                showAds(r);
+            } });
+            list.appendChild(h('div', { class: 'sr-card' }, [
+                h('div', { class: 'sr-help', text: 'Found in your subtitle files, not on the list yet. Tick the ones that are ads, add them, then click Save.' }),
+                table,
+                h('div', { class: 'sr-buttons' }, [add])
+            ]));
+        }
+
+        var adTimer;
+        function pollAds(status) {
+            clearTimeout(adTimer);
+            if (!status || status.State !== 'InProgress') return;
+            adTimer = setTimeout(function () {
+                getJson('SubRemover/SubtitleAds/Status').then(function (r) {
+                    showAds(r);
+                    pollAds(r.Status);
+                }, function () { pollAds(status); });
+            }, 4000);
         }
 
         function quickSetupWidget() {
@@ -364,7 +485,8 @@ define([], function () {
         function loadLog(name) {
             var select = el('srLogPick');
             if (!select) return;
-            getJson('SubRemover/LogView', { Name: name || select.value || '' }).then(function (r) {
+            // No name (opening the tab): the server sends the newest log, including runs since this page was opened.
+            getJson('SubRemover/LogView', { Name: name || '' }).then(function (r) {
                 el('srLogText').value = r.Text || '';
                 var has = !!r.Name;
                 [['srLogOpen', r.OpenUrl], ['srLogDownload', r.DownloadUrl]].forEach(function (x) {
@@ -383,7 +505,7 @@ define([], function () {
             });
         }
 
-        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget };
+        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget };
 
         // ---------------------------------------------------------------- draw
 
@@ -432,6 +554,8 @@ define([], function () {
                 draw();
                 setSaveStatus('');
                 pollIfRunning(p.Status);
+                pollHash(p.HashStatus);
+                pollAds(p.AdStatus && p.AdStatus.Status);
             }, function (err) {
                 errorText(err).then(function (t) { el('srLoadError').textContent = 'Couldn\'t load the settings: ' + t; });
             });

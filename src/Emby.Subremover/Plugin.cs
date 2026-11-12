@@ -122,6 +122,120 @@ namespace Emby.Subremover
             return RunStatus.Started(DateTime.Now);
         }
 
+        // The button pressed for the next "Download hash-matched subtitles" run: true = count only; null = scheduled run.
+        private bool? _hashRunMode;
+
+        internal bool? TakeHashRunMode()
+        {
+            lock (_hashLock)
+            {
+                var mode = _hashRunMode;
+                _hashRunMode = null;
+                return mode;
+            }
+        }
+
+        private readonly object _hashLock = new object();
+
+        private IScheduledTaskWorker HashTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is HashSubtitlesTask);
+
+        /// <returns>The status line to show after "Count" or "Download hash-matched subtitles".</returns>
+        internal StatusItem StartHashRun(bool countOnly)
+        {
+            var worker = HashTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return HashStatus();
+            lock (_hashLock) _hashRunMode = countOnly;
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<HashSubtitlesTask>();
+            return new StatusItem("Hash-matched subtitles", $"{(countOnly ? "Counting" : "Downloading")} started at {DateTime.Now:HH:mm}. " +
+                                                             "The result shows here and in its log.", ItemStatus.InProgress);
+        }
+
+        internal StatusItem HashStatus()
+        {
+            const string caption = "Hash-matched subtitles";
+            try
+            {
+                var worker = HashTaskWorker();
+                if (worker?.State == TaskState.Running)
+                    return new StatusItem(caption, worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", ItemStatus.InProgress);
+                if (worker?.State == TaskState.Cancelling) return new StatusItem(caption, "Stopping…", ItemStatus.Warning);
+                var last = HashSubtitlesTask.LastResult;
+                return last == null
+                    ? new StatusItem(caption, "Not run since Emby started.", ItemStatus.None)
+                    : new StatusItem(caption, last, last.Contains("Stopped") ? ItemStatus.Warning : ItemStatus.Succeeded);
+            }
+            catch (Exception ex)
+            {
+                return new StatusItem(caption, "Status unavailable: " + ex.Message, ItemStatus.Unknown);
+            }
+        }
+
+        // The button pressed for the next "Remove ads from subtitle files" run: true = find only; null = scheduled run.
+        private bool? _adRunMode;
+        private DateTime _adQueuedUtc;
+        private readonly object _adLock = new object();
+
+        internal bool? TakeAdRunMode()
+        {
+            lock (_adLock)
+            {
+                var mode = _adRunMode;
+                _adRunMode = null;
+                return mode;
+            }
+        }
+
+        private IScheduledTaskWorker AdTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is SubtitleAdsTask);
+
+        internal const string AdCaption = "Ads in subtitle files";
+
+        /// <returns>The status line to show after "Test run" (find ads) or "Remove ads".</returns>
+        internal StatusItem StartAdRun(bool findOnly)
+        {
+            var worker = AdTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return AdStatus();
+            lock (_adLock)
+            {
+                _adRunMode = findOnly;
+                _adQueuedUtc = DateTime.UtcNow;
+            }
+            // The link would otherwise point at the previous run's log until this one has started.
+            SubtitleAdsTask.LastLogName = null;
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<SubtitleAdsTask>();
+            return new StatusItem(AdCaption, $"{(findOnly ? "Finding" : "Removing")} started at {DateTime.Now:HH:mm}. " +
+                                             "The result shows here and in its log.", ItemStatus.InProgress);
+        }
+
+        internal StatusItem AdStatus()
+        {
+            try
+            {
+                var worker = AdTaskWorker();
+                if (worker?.State == TaskState.Running)
+                    return new StatusItem(AdCaption, worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", ItemStatus.InProgress);
+                if (worker?.State == TaskState.Cancelling) return new StatusItem(AdCaption, "Stopping…", ItemStatus.Warning);
+                // Queued by a button but not started yet: still in progress, so the page keeps checking.
+                bool queued;
+                lock (_adLock)
+                {
+                    // Never started within two minutes: stop saying so (the next scheduled run then follows Test mode).
+                    if (_adRunMode != null && DateTime.UtcNow - _adQueuedUtc > TimeSpan.FromMinutes(2)) _adRunMode = null;
+                    queued = _adRunMode != null;
+                }
+                if (queued) return new StatusItem(AdCaption, "Starting…", ItemStatus.InProgress);
+                var last = SubtitleAdsTask.LastResult;
+                return last == null
+                    ? new StatusItem(AdCaption, "Not run since Emby started.", ItemStatus.None)
+                    : new StatusItem(AdCaption, last, last.StartsWith("Stopped") || last.StartsWith("Didn't") ? ItemStatus.Warning : ItemStatus.Succeeded);
+            }
+            catch (Exception ex)
+            {
+                return new StatusItem(AdCaption, "Status unavailable: " + ex.Message, ItemStatus.Unknown);
+            }
+        }
+
         // Never let a status problem stop the settings page from opening.
         public const string RestoreCaption = "Restore";
 
@@ -132,7 +246,8 @@ namespace Emby.Subremover
         internal (string Refusal, List<BackupEntry> Backups) RestorePlan()
         {
             var busy = _applicationHost.Resolve<ITaskManager>().ScheduledTasks
-                .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask) && w.State != TaskState.Idle);
+                .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask || w.ScheduledTask is SubtitleAdsTask)
+                          && w.State != TaskState.Idle);
             var backups = NewestFirst(_state.Load().Backups);
             return (RestoreRefusal(busy, backups.Count), backups);
         }

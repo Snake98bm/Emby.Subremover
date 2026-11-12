@@ -50,6 +50,7 @@ namespace Emby.Subremover
                 {
                     _log.ErrorException("SubRemover: could not read settings from {0}, using defaults", ex, FilePath);
                 }
+                Upgrade(_options);
                 return _options;
             }
         }
@@ -73,6 +74,23 @@ namespace Emby.Subremover
                     _json.SerializeToStream(clean, stream, new JsonSerializerOptions { Indent = true });
                 }
                 _options = clean;
+            }
+        }
+
+        /// <summary>Settings saved by an older SubRemover keep doing what they did.</summary>
+        internal static void Upgrade(PluginOptions options)
+        {
+            if (options.OptionsVersion < 1)
+            {
+                // Before 1.0.0, guessing that changed tracks also fixed wrong language tags (unknown ones lost their tag).
+                if (options.GuessLanguages && !options.GuessForFilesOnly) options.WrongLanguageTags = WrongLanguageTags.FixTheTag;
+                options.OptionsVersion = 1;
+            }
+            if (options.OptionsVersion < 2)
+            {
+                // New in 1.0.0 and on by default; an "off" saved before this came from the first alphas' default.
+                options.DownloadHashMatchedSubtitles = true;
+                options.OptionsVersion = 2;
             }
         }
 
