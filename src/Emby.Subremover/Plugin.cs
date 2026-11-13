@@ -243,13 +243,24 @@ namespace Emby.Subremover
         /// Every video with a backup, newest first so what was just changed is at the top, or why the Restore button won't.
         /// The path filter isn't used: the ticks on the list decide what's restored.
         /// </summary>
-        internal (string Refusal, List<BackupEntry> Backups) RestorePlan()
+        internal (string Refusal, List<BackupEntry> Backups) RestorePlan(string show = null)
         {
             var busy = _applicationHost.Resolve<ITaskManager>().ScheduledTasks
                 .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask || w.ScheduledTask is SubtitleAdsTask)
                           && w.State != TaskState.Idle);
-            var backups = NewestFirst(_state.Load().Backups);
-            return (RestoreRefusal(busy, backups.Count), backups);
+            var backups = NewestFirst(OfKind(_state.Load().Backups, show));
+            return (RestoreRefusal(busy, backups.Count, show), backups);
+        }
+
+        /// <summary>The restore list's "Show": "videos", "subtitles", or anything else for all backups.</summary>
+        internal static IEnumerable<BackupEntry> OfKind(IEnumerable<BackupEntry> backups, string show)
+        {
+            switch ((show ?? "").ToLowerInvariant())
+            {
+                case "videos": return backups.Where(b => !Core.SubtitleAdFiles.IsSubtitleBackup(b));
+                case "subtitles": return backups.Where(Core.SubtitleAdFiles.IsSubtitleBackup);
+                default: return backups;
+            }
         }
 
         internal static List<BackupEntry> NewestFirst(IEnumerable<BackupEntry> backups) =>
@@ -283,10 +294,18 @@ namespace Emby.Subremover
                 .Select(i => listed[i])
                 .ToList();
 
-        internal static string RestoreRefusal(bool busy, int backups)
+        internal static string RestoreRefusal(bool busy, int backups, string show = null)
         {
             if (busy) return "Nothing restored: SubRemover is running. Try again when it has finished.";
-            if (backups == 0) return "There are no backups to restore.";
+            if (backups == 0)
+            {
+                switch ((show ?? "").ToLowerInvariant())
+                {
+                    case "videos": return "There are no video backups to restore.";
+                    case "subtitles": return "There are no subtitle file backups to restore.";
+                    default: return "There are no backups to restore.";
+                }
+            }
             return null;
         }
 

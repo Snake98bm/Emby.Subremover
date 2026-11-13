@@ -74,6 +74,8 @@ namespace Emby.Subremover
     [Authenticated(Roles = "Admin")]
     public class GetBackups : IReturn<BackupListDto>
     {
+        /// <summary>"all" (default), "videos" or "subtitles".</summary>
+        public string Show { get; set; }
     }
 
     [Route("/SubRemover/Restore", "POST", Summary = "Restores the selected videos from their backups", IsHidden = true)]
@@ -85,6 +87,9 @@ namespace Emby.Subremover
 
         /// <summary>The selected rows, e.g. "0,3,5".</summary>
         public string Indexes { get; set; }
+
+        /// <summary>The "Show" the list was made with, as passed to GetBackups.</summary>
+        public string Show { get; set; }
     }
 
     [Route("/SubRemover/LogView", "GET", Summary = "One run log, for the Logs tab", IsHidden = true)]
@@ -281,7 +286,7 @@ namespace Emby.Subremover
 
         public object Get(GetBackups request)
         {
-            var (refusal, backups) = Plugin.RestorePlan();
+            var (refusal, backups) = Plugin.RestorePlan(request.Show);
             return new BackupListDto
             {
                 Refusal = refusal,
@@ -304,7 +309,7 @@ namespace Emby.Subremover
         public object Post(StartRestore request)
         {
             var plugin = Plugin;
-            var (refusal, backups) = plugin.RestorePlan();
+            var (refusal, backups) = plugin.RestorePlan(request.Show);
             if (refusal != null) return Warning(refusal);
             if (string.IsNullOrEmpty(request.Key) || request.Key != RestoreKey(backups))
                 return Warning("Nothing restored: the list of backups changed. Click 'Restore originals from backups…' to see it again.");

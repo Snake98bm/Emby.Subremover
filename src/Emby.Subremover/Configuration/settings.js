@@ -391,11 +391,19 @@ define([], function () {
             var count = h('p', { class: 'sr-help', id: 'srBackupCount', text: page.BackupCount || '' });
             var status = h('div', { class: 'sr-status', id: 'srRestoreStatus', role: 'status' });
             var list = h('div', { id: 'srRestoreList' });
+            var show = h('select', { id: 'srRestoreShow', title: 'Which backups to list', onchange: function () {
+                if (el('srRestoreList').childNodes.length) listBackups();   // the list is open: show it again with the new choice
+            } }, [
+                h('option', { value: 'all', text: 'All backups' }),
+                h('option', { value: 'videos', text: 'Video files only' }),
+                h('option', { value: 'subtitles', text: 'Subtitle files (.srt) only' })
+            ]);
             return h('div', {}, [
                 count,
                 h('div', { class: 'sr-buttons' }, [
+                    h('label', { class: 'sr-muted', text: 'Show' }), show,
                     h('button', { type: 'button', class: 'sr-btn', text: '↺ Restore originals from backups…', onclick: listBackups }),
-                    h('span', { class: 'sr-muted', text: 'Lists the videos with a backup to choose from. Nothing is restored until you confirm.' })
+                    h('span', { class: 'sr-muted', text: 'Lists the files with a backup to choose from. Nothing is restored until you confirm.' })
                 ]),
                 status,
                 list
@@ -405,14 +413,18 @@ define([], function () {
         function listBackups() {
             var status = el('srRestoreStatus');
             var list = el('srRestoreList');
+            var show = el('srRestoreShow').value;
+            // what one row is, for the button and confirm texts
+            var noun = show === 'videos' ? ['video', 'videos'] : show === 'subtitles' ? ['subtitle file', 'subtitle files'] : ['file', 'files'];
             list.innerHTML = '';
             showStatus(status, { Text: 'Looking for backups…', State: 'InProgress' });
-            getJson('SubRemover/Backups').then(function (r) {
+            getJson('SubRemover/Backups', { Show: show }).then(function (r) {
                 backupList = r;
                 if (r.Refusal) { showStatus(status, { Caption: 'Restore', Text: r.Refusal, State: 'Warning' }); return; }
                 showStatus(status, { Caption: 'Restore', State: 'Warning', Text:
-                    'Tick the videos to restore, then click Restore selected. Each one is replaced by the original from its backup, ' +
-                    'undoing everything SubRemover changed in it. Subtitle files SubRemover saved next to them stay.' +
+                    'Tick the ' + noun[1] + ' to restore, then click Restore selected. Each one is replaced by the original from its backup, ' +
+                    'undoing everything SubRemover changed in it.' +
+                    (show === 'subtitles' ? '' : ' Subtitle files SubRemover saved next to restored videos stay.') +
                     (r.Total > r.Items.length ? ' Only the newest ' + r.Items.length + ' of ' + r.Total + ' are listed; restore older ones in another go.' : '') });
 
                 var boxes = [];
@@ -420,14 +432,14 @@ define([], function () {
                 function updateButton() {
                     var n = boxes.filter(function (b) { return b.checked; }).length;
                     restoreBtn.disabled = n === 0;
-                    restoreBtn.textContent = n === 0 ? 'Restore selected' : n === 1 ? 'Restore this video' : 'Restore ' + n + ' videos';
+                    restoreBtn.textContent = n === 0 ? 'Restore selected' : n === 1 ? 'Restore this ' + noun[0] : 'Restore ' + n + ' ' + noun[1];
                     all.checked = n > 0 && n === boxes.length;
                 }
                 var all = h('input', { type: 'checkbox', title: 'Select all', onchange: function () {
                     boxes.forEach(function (b) { b.checked = all.checked; });
                     updateButton();
                 } });
-                var table = h('table', { class: 'sr-table' }, [h('tr', {}, [h('th', {}, [all]), h('th', { text: 'Video' }), h('th', { text: 'Backup made' })])]);
+                var table = h('table', { class: 'sr-table' }, [h('tr', {}, [h('th', {}, [all]), h('th', { text: show === 'videos' ? 'Video' : show === 'subtitles' ? 'Subtitle file' : 'File' }), h('th', { text: 'Backup made' })])]);
                 r.Items.forEach(function (item, i) {
                     var box = h('input', { type: 'checkbox', 'data-index': String(i), onchange: updateButton });
                     boxes.push(box);
@@ -444,10 +456,10 @@ define([], function () {
                 function restoreSelected() {
                     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute('data-index'); });
                     if (!picked.length) return;
-                    var what = picked.length === 1 ? 'this video' : 'these ' + picked.length + ' videos';
+                    var what = picked.length === 1 ? 'this ' + noun[0] : 'these ' + picked.length + ' ' + noun[1];
                     if (!window.confirm('Restore ' + what + '? Each one is replaced by its original from the backup, undoing what SubRemover changed.')) return;
                     restoreBtn.disabled = true;
-                    postJson('SubRemover/Restore', { Key: backupList.Key, Indexes: picked.join(',') }).then(function (s) {
+                    postJson('SubRemover/Restore', { Key: backupList.Key, Indexes: picked.join(','), Show: show }).then(function (s) {
                         showStatus(status, s);
                         list.innerHTML = '';
                     }, function (err) {
