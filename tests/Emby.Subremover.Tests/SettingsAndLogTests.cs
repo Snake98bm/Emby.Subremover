@@ -150,6 +150,24 @@ public sealed class SettingsAndLogTests : IDisposable
     }
 
     [Fact]
+    public void Restore_list_can_show_only_videos_or_only_subtitle_files()
+    {
+        var backups = new[]
+        {
+            new BackupEntry { OriginalPath = @"\\nas\Movies\My Movie (2020)\My Movie (2020).mkv" },
+            new BackupEntry { OriginalPath = @"\\nas\Movies\My Movie (2020)\My Movie (2020).en.SRT" },
+            new BackupEntry { OriginalPath = @"\\nas\TV\My Show\S01E01.mp4" },
+        };
+
+        Assert.Equal(3, Plugin.OfKind(backups, null).Count());
+        Assert.Equal(3, Plugin.OfKind(backups, "all").Count());
+        Assert.Equal(2, Plugin.OfKind(backups, "Videos").Count());
+        Assert.Equal(@"\\nas\Movies\My Movie (2020)\My Movie (2020).en.SRT", Assert.Single(Plugin.OfKind(backups, "subtitles")).OriginalPath);
+        Assert.Equal("There are no subtitle file backups to restore.", Plugin.RestoreRefusal(false, 0, "subtitles"));
+        Assert.Equal("There are no backups to restore.", Plugin.RestoreRefusal(false, 0));
+    }
+
+    [Fact]
     public void Only_the_selected_videos_are_restored()
     {
         var backups = Enumerable.Range(0, 4).Select(i => new BackupEntry { OriginalPath = $"v{i}.mkv", BackupPath = $"v{i}.bak" }).ToList();

@@ -201,7 +201,8 @@ namespace Emby.Subremover
                 "Backups of .srt files that had ads taken out ('Movie.en.srt.subremover.bak' next to it, or in the backup folder). " +
                 "They're a few dozen KB each, so they can be kept much longer than video backups. 0 keeps them forever."),
             (SettingsTabId.Backups, "Restore originals from backups",
-                "Lists every video that has a backup, newest first, with nothing selected. Select the ones to restore, then click 'Yes, " +
+                "Lists every video that has a backup, newest first, with nothing selected. 'Show' picks all backups, video files only, " +
+                "or subtitle files (.srt with ads taken out) only. Select the ones to restore, then click 'Yes, " +
                 "restore...': each one is replaced by its original, undoing what SubRemover changed. Subtitle files SubRemover saved stay. " +
                 "Test mode doesn't apply. Later runs leave restored videos alone. Moved a video, or its whole folder or library, on " +
                 "the share? The next run finds it again by its file name among the videos Emby has (same size and date for videos " +
