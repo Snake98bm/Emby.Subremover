@@ -189,8 +189,12 @@ namespace Emby.Subremover
         public bool DeleteOtherVersionSubtitles { get; set; }
 
         [DisplayName("...delete subtitle files that are way off")]
-        [Description("English .srt files of videos with English audio that moving can't fix (another cut or frame rate), deleted even when they're the only English file. Backed up first, on the restore list. Recommended: more than 2 s off in most of the file.")]
+        [Description("English .srt files of videos with English audio that moving can't fix (another cut or frame rate), deleted even when they're the only English file. Backed up first, on the restore list. Recommended: more than 2 s off anywhere in the file (start, middle or end).")]
         public WayOffSubtitles DeleteWayOffSubtitles { get; set; } = WayOffSubtitles.Off;
+
+        [DisplayName("...count audio with no language tag as English")]
+        [Description("For the way-off setting: a video whose audio track has no language (or \"und\") is treated as English. Off: such videos never lose a file this way.")]
+        public bool WayOffUntaggedAudioIsEnglish { get; set; }
 
         [DisplayName("...skip .srt files extracted from the video's own subtitles")]
         [Description("A file SubRemover extracted from the video's built-in text subtitle is an exact copy, so it's in sync: it isn't measured, and a video with only such files isn't read at all.")]

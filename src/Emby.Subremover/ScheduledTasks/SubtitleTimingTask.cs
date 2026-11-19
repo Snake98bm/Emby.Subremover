@@ -106,6 +106,7 @@ namespace Emby.Subremover.ScheduledTasks
             var state = _store.Load();
             var files = new SubtitleTimingFiles(_runner, countOnly, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles, options.BackupMode, options.BackupFolder, log, options.DeleteWayOffSubtitles);
             files.SkipExtracted = options.SkipExtractedTimingCopies;
+            files.UntaggedAudioIsEnglish = options.WayOffUntaggedAudioIsEnglish;
             files.Begin(state);
             // Scan run: saves what it finds for each video. Fix: uses that for videos unchanged since (Start over: measures all).
             TimingPlan plan = null;

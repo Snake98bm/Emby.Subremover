@@ -418,6 +418,7 @@ namespace Emby.Subremover.ScheduledTasks
             var testOnly = !options.ChangesSubtitleFiles;
             var files = new SubtitleTimingFiles(_runner, testOnly, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles, options.BackupMode, options.BackupFolder, _log, options.DeleteWayOffSubtitles);
             files.SkipExtracted = options.SkipExtractedTimingCopies;
+            files.UntaggedAudioIsEnglish = options.WayOffUntaggedAudioIsEnglish;
             files.Begin(state);
             foreach (var video in videos)
             {

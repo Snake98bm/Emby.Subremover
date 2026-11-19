@@ -117,6 +117,7 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.DeleteOutOfSyncDuplicates)),
                     F(nameof(PluginOptions.DeleteOtherVersionSubtitles)),
                     F(nameof(PluginOptions.DeleteWayOffSubtitles)),
+                    F(nameof(PluginOptions.WayOffUntaggedAudioIsEnglish)),
                     F(nameof(PluginOptions.SkipExtractedTimingCopies)),
                     F(nameof(PluginOptions.TimingVideosPerRun)),
                     F(nameof(PluginOptions.TimingVideosAtOnce)),

@@ -30,9 +30,9 @@ namespace Emby.Subremover.Core
     {
         [Description("Off: never delete the only file of a language")]
         Off,
-        [Description("Careful: drifts or jumps more than 5 s in most of the file")]
+        [Description("Careful: drifts or jumps more than 5 s anywhere in the file")]
         MoreThan5Seconds,
-        [Description("Recommended: drifts or jumps more than 2 s in most of the file")]
+        [Description("Recommended: drifts or jumps more than 2 s anywhere in the file")]
         MoreThan2Seconds,
         [Description("Most: as Recommended, plus files that don't match the speech at all")]
         MoreThan2SecondsOrNoMatch
@@ -135,6 +135,9 @@ namespace Emby.Subremover.Core
         /// exact copy of it, so they're in sync by definition and never measured (no audio is read for them).</summary>
         public bool SkipExtracted { get; set; }
 
+        /// <summary>For the way-off setting: audio with no language tag (or "und") counts as English.</summary>
+        public bool UntaggedAudioIsEnglish { get; set; }
+
         /// <summary>Extracted files left out this run because of <see cref="SkipExtracted"/>.</summary>
         public int SkippedCopies;
 
@@ -150,7 +153,11 @@ namespace Emby.Subremover.Core
         private string BaseSignature => $"v{Version};min={SubtitleSync.DefaultMinShiftMs};delete={_deleteOffDuplicates};versions={_deleteOtherVersions}";
 
         // Any change here measures every file again: files left alone before may now be deleted.
-        private string Signature => BaseSignature + (_wayOff == WayOffSubtitles.Off ? "" : $";wayoff={_wayOff}");
+        private string Signature => BaseSignature + (_wayOff == WayOffSubtitles.Off ? ""
+            : $";wayoff={_wayOff};wayoffv={WayOffVersion}" + (UntaggedAudioIsEnglish ? ";untagged=eng" : ""));
+
+        /// <summary>2: one part (start, middle or end) off by more than the limit is enough.</summary>
+        private const int WayOffVersion = 2;
 
         /// <summary>The settings a saved <see cref="TimingPlan"/> must have been made with for Fix to use it. Not the way-off
         /// setting: Fix decides that again from the saved measurements.</summary>
@@ -293,7 +300,7 @@ namespace Emby.Subremover.Core
                     sub.Result = SubtitleSync.Measure(speech, SrtTimes.Read(file.Text));
                 }
             }
-            Decide(subs.Select(s => s.Sub).ToList(), _deleteOffDuplicates, _deleteOtherVersions, _wayOff, audioLanguage);
+            Decide(subs.Select(s => s.Sub).ToList(), _deleteOffDuplicates, _deleteOtherVersions, _wayOff, audioLanguage, UntaggedAudioIsEnglish);
 
             // "Movie.mkv" and "Movie.mp4" in one folder share their .srt files, and may be different cuts: what's right
             // for one can be wrong for the other, so nothing is moved or deleted; the log says what one of them found.
@@ -362,11 +369,12 @@ namespace Emby.Subremover.Core
         /// that drift or don't match the speech (made for another cut or frame rate).</param>
         /// <param name="wayOff">Also delete English files that are way off when the audio is English, even the only one.</param>
         /// <param name="audioLanguage">The language tag of the audio track that was measured ("eng"), or null/"" when unknown.</param>
+        /// <param name="untaggedAudioIsEnglish">Audio with no language tag (null, "" or "und") counts as English.</param>
         public static void Decide(IList<MeasuredSubtitle> subs, bool deleteOffDuplicates, bool deleteOtherVersions = false,
-            WayOffSubtitles wayOff = WayOffSubtitles.Off, string audioLanguage = null)
+            WayOffSubtitles wayOff = WayOffSubtitles.Off, string audioLanguage = null, bool untaggedAudioIsEnglish = false)
         {
             DecideCopies(subs, deleteOffDuplicates, deleteOtherVersions);
-            if (wayOff == WayOffSubtitles.Off || Languages.Normalize(audioLanguage) != "eng") return;
+            if (wayOff == WayOffSubtitles.Off || !AudioIsEnglish(audioLanguage, untaggedAudioIsEnglish)) return;
             foreach (var sub in subs.Where(s => s.Action == TimingAction.LeaveAlone && IsWayOff(s, wayOff)))
             {
                 sub.Action = TimingAction.Delete;
@@ -374,9 +382,17 @@ namespace Emby.Subremover.Core
             }
         }
 
+        /// <summary>Whether the measured audio is English: tagged so, or untagged when that's asked to count.</summary>
+        internal static bool AudioIsEnglish(string audioLanguage, bool untaggedAudioIsEnglish)
+        {
+            var lang = Languages.Normalize(audioLanguage);
+            return lang == "eng" || (untaggedAudioIsEnglish && lang == "und");
+        }
+
         /// <summary>
-        /// An English file (regular or SDH, never forced, commentary or audio description) that moving can't fix: at least two
-        /// of its start, middle and end are off by more than the limit; or, with the most setting, it doesn't match the speech.
+        /// An English file (regular or SDH, never forced, commentary or audio description) that moving can't fix: its start,
+        /// middle or end is off by more than the limit (a jump near the end counts too); or, with the most setting, it
+        /// doesn't match the speech.
         /// </summary>
         internal static bool IsWayOff(MeasuredSubtitle s, WayOffSubtitles wayOff)
         {
@@ -386,7 +402,7 @@ namespace Emby.Subremover.Core
             if (r.Verdict == TimingVerdict.Drifts)
             {
                 var limit = wayOff == WayOffSubtitles.MoreThan5Seconds ? 5000 : 2000;
-                return (r.PartOffsetsMs ?? new long[0]).Count(o => Math.Abs(o) > limit) >= 2;
+                return (r.PartOffsetsMs ?? new long[0]).Any(o => Math.Abs(o) > limit);
             }
             // Confidence 0 means it couldn't be worked out at all (too little audio): never a reason to delete.
             return r.Verdict == TimingVerdict.Unsure && wayOff == WayOffSubtitles.MoreThan2SecondsOrNoMatch

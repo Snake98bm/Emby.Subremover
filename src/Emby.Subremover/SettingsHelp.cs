@@ -207,13 +207,17 @@ namespace Emby.Subremover
             (SettingsTabId.SubtitleFiles, "...delete subtitle files that are way off",
                 "For a file that moving can't fix and that has no better copy to keep instead, so it's the only English file. Only " +
                 "English .srt files (regular or SDH; never forced, commentary or audio description), and only when the video's " +
-                "audio track is tagged English: the speech is what the file is measured against. Careful deletes a file whose " +
-                "start, middle and end are at least two of them more than 5 seconds off; Recommended does the same at 2 seconds " +
-                "(a file that's right for most of the video and only jumps near the end stays); Most also deletes files that " +
+                "audio track is tagged English (or has no tag, with the setting below): the speech is what the file is measured " +
+                "against. Careful deletes a file whose start, middle or end is more than 5 seconds off; Recommended does the same " +
+                "at 2 seconds, so a file that's right for most of the video but jumps near the end goes too; Most also deletes files that " +
                 "don't match the speech at all (a match score under 3, where 6 is a match), which can also be a quiet mix or a " +
                 "music-heavy video, so check its Scan run first. Each file is backed up first and shows on the restore list. With " +
                 "an English file gone, Emby may download a better one the next time it refreshes the video. Scan run lists what " +
                 "would go; changing this setting doesn't need a new scan."),
+            (SettingsTabId.SubtitleFiles, "...count audio with no language tag as English",
+                "Many videos have an audio track with no language set (\"und\"), so the way-off setting skips them. Turn this on " +
+                "when your untagged audio is English, and those videos are checked like English ones. Leave it off if you have " +
+                "untagged videos in other languages. A plain Movie.srt with no language in its name still isn't counted as English."),
             (SettingsTabId.SubtitleFiles, "Scan run / Fix timing now",
                 "Go through the .srt files next to the videos in your libraries (and path filter). Scan run measures every file and " +
                 "changes nothing, whatever Test mode is set to: it lists each file and how far off it is in its log, and saves what " +
