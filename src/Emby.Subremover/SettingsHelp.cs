@@ -53,7 +53,7 @@ namespace Emby.Subremover
                 "time: it's limited by the speed of your disk or network share, and OCR already uses two CPU cores. Everything " +
                 "SubRemover starts runs at below-normal priority, so playback comes first. Use 1 to check one video at a time."),
             (SettingsTabId.Run, "Show in the server sidebar menu",
-                "Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. After changing it, click Save " +
+                "Lists SubRemover in the Server section of the sidebar, next to Dashboard and Libraries. It's always under Plugins too. After changing it, click Save " +
                 "and then hold Ctrl and press F5 (on a Mac: Cmd+Shift+R). That reloads the Emby page fully; a plain F5 can " +
                 "still show the old menu."),
             (SettingsTabId.Run, "Re-check every video on next run",

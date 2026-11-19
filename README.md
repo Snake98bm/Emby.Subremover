@@ -19,7 +19,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - Optional: fix the timing of `.srt` files next to the videos. Each file is measured against the video's speech; one that's off by the same amount all the way through is moved, worse copies of a language can be deleted, and English files that are way off (more than 2 or 5 s at the start, middle or end) can be deleted even when they're the only one. Audio with no language tag can count as English for this. Every change is backed up first.
 - Optional: remove commentary tracks, remove SDH/CC/hearing-impaired tracks (only when a regular track in the same language stays), keep forced tracks in any language, keep tracks with no language set.
 - Optional: process new videos as Emby adds them. A few minutes after the last one arrives, one run checks just the new videos with your settings (Test mode included), so a whole season gets one run and one log.
-- Its own settings page with tabs (**Run**, **Subtitles**, **Subtitle files**, **Backups**, **Logs**), each explaining its settings at the bottom: **Run now**, run status, a restore list and a log viewer (open a log in a new window or download it), plus an entry in the server sidebar under **Advanced** (can be turned off).
+- Its own settings page with tabs (**Run**, **Subtitles**, **Subtitle files**, **Backups**, **Logs**), each explaining its settings at the bottom: **Run now**, run status, a restore list and a log viewer (open a log in a new window or download it), plus an entry in the server sidebar's **Server** section (can be turned off).
 
 ## Install
 
