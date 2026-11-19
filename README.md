@@ -40,7 +40,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
    docker cp Emby.Subremover.dll emby:/config/plugins/
    ```
 3. Start Emby (Docker: `docker start emby`) and press **Ctrl+F5** in your browser so the menus reload.
-4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** under **Advanced** in the server sidebar). On the **Run** tab pick your libraries and leave **Test mode** on; on the **Subtitles** tab pick your languages, or click **Quick setup: English + no language**. Click **Save**.
+4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** in the **Server** section of the sidebar). On the **Run** tab pick your libraries and leave **Test mode** on; on the **Subtitles** tab pick your languages, or click **Quick setup: English + no language**. Click **Save**.
 5. Click **Run now**. The status on the **Run** tab shows progress, and its log appears on the **Logs** tab.
 6. When the log looks right, turn Test mode off, set **Max videos to change per run** to a few, and run it again. Check those files in Emby before letting it do the rest.
 
