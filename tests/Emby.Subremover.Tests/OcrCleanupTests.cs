@@ -66,6 +66,22 @@ public class OcrCleanupTests
     }
 
     [Theory]
+    [InlineData("50 what are you saying?", "So what are you saying?")]
+    [InlineData("- 50 what are you going to do?", "- So what are you going to do?")]
+    [InlineData("<i>50 you came back.</i>", "<i>So you came back.</i>")]
+    [InlineData("Fine. 50, I guess we wait.", "Fine. So, I guess we wait.")]
+    [InlineData("5o what?", "So what?")]
+    [InlineData("and S0 we left.", "and so we left.")]
+    [InlineData("I was going over 50", "I was going over 50")]          // a real number
+    [InlineData("50 people came.", "50 people came.")]                  // a number starting a sentence
+    [InlineData("He's 50 if he's a day.", "He's 50 if he's a day.")]    // not the start of a sentence
+    [InlineData("50, 60 years ago.", "50, 60 years ago.")]
+    public void So_read_as_50_is_fixed_but_real_numbers_stay(string ocr, string expected)
+    {
+        Assert.Equal(expected, EnglishText.FixSo(ocr));
+    }
+
+    [Theory]
     [InlineData("1 don't know.", "I don't know.")]
     [InlineData("l think so.", "I think so.")]
     [InlineData("/ want to go.", "I want to go.")]

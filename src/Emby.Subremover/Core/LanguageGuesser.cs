@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+// The same file is in AudioRemover (Core/LanguageGuesser.cs), with its own namespace. Keep the two copies alike.
 namespace Emby.Subremover.Core
 {
     public class LanguageGuess

@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
 
+// The same file is in AudioRemover (Core/SrtText.cs), with its own namespace. Keep the two copies alike.
 namespace Emby.Subremover.Core
 {
     /// <summary>The words people read in an .srt file, without cue numbers, timings or formatting tags.</summary>

@@ -31,6 +31,7 @@ namespace Emby.Subremover.ScheduledTasks
             _embyLog = logManager.GetLogger("SubRemover");
             _logDirectory = appPaths.LogDirectoryPath;
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
+            LastResults.UseFolder(appPaths.PluginConfigurationsPath);
         }
 
         public string Name => "Remove ads from subtitle files";
@@ -42,8 +43,14 @@ namespace Emby.Subremover.ScheduledTasks
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
-        /// <summary>What the last run found, for the settings page (until Emby restarts).</summary>
-        internal static string LastResult { get; private set; }
+        /// <summary>When the last run finished and what it found, for the settings page; kept across restarts.</summary>
+        internal static string LastResult
+        {
+            get => _lastResult ?? LastResults.Load("ads");
+            private set { _lastResult = value; LastResults.Save("ads", value); }
+        }
+
+        private static string _lastResult;
 
         /// <summary>The log file of the last Find (test run) or Remove, for the link on the settings page.</summary>
         internal static string LastLogName { get; set; }
@@ -54,7 +61,7 @@ namespace Emby.Subremover.ScheduledTasks
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
-            var countOnly = Plugin.Instance.TakeAdRunMode() ?? options.DryRun;
+            var countOnly = Plugin.Instance.TakeAdRunMode() ?? !options.ChangesSubtitleFiles;
             using (var log = new RunLog(_logDirectory, "subremover", _embyLog))
             {
                 LastLogName = log.FileName;

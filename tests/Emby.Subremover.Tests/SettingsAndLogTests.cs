@@ -13,6 +13,25 @@ public sealed class SettingsAndLogTests : IDisposable
 
     public void Dispose() => Directory.Delete(_dir, true);
 
+    [Theory]
+    [InlineData(false, false, true)]  // real runs change subtitle files
+    [InlineData(false, true, true)]   // the exception means nothing with Test mode off
+    [InlineData(true, false, false)]  // Test mode: only logs
+    [InlineData(true, true, true)]    // Test mode with the exception: videos untouched, subtitle files cleaned up
+    public void Test_mode_can_still_let_subtitle_files_change(bool dryRun, bool exception, bool changes)
+    {
+        var options = new PluginOptions { DryRun = dryRun, SubtitleFilesInTestMode = exception };
+        Assert.Equal(changes, options.ChangesSubtitleFiles);
+    }
+
+    [Fact]
+    public void Subtitle_files_exception_sits_under_Test_mode_and_is_off_by_default()
+    {
+        Assert.False(new PluginOptions().SubtitleFilesInTestMode);
+        var run = SettingsLayout.Tabs.Single(t => t.Id == SettingsTabId.Run).Entries.Select(e => e.Item2).ToList();
+        Assert.Equal(run.IndexOf(nameof(PluginOptions.DryRun)) + 1, run.IndexOf(nameof(PluginOptions.SubtitleFilesInTestMode)));
+    }
+
     [Fact]
     public void Page_title_shows_the_name_and_version()
     {

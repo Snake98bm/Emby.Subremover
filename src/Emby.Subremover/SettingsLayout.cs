@@ -37,6 +37,7 @@ namespace Emby.Subremover
         internal const string LogsWidget = "logs";
         internal const string HashWidget = "hashSubs";
         internal const string AdsWidget = "subAds";
+        internal const string TimingWidget = "subTiming";
 
         internal sealed class TabLayout
         {
@@ -57,6 +58,7 @@ namespace Emby.Subremover
                 {
                     W(RunWidget),
                     F(nameof(PluginOptions.DryRun)),
+                    F(nameof(PluginOptions.SubtitleFilesInTestMode)),
                     F(nameof(PluginOptions.Libraries)),
                     F(nameof(PluginOptions.MaxItemsPerRun)),
                     F(nameof(PluginOptions.OnlyPathContains)),
@@ -110,7 +112,17 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.RemoveSubtitleCredits)),
                     F(nameof(PluginOptions.RemoveCaptionCredits)),
                     W(AdsWidget),
-                    H("OCR (experimental)"),
+                    H("Timing of subtitle files"),
+                    F(nameof(PluginOptions.FixSubtitleTiming)),
+                    F(nameof(PluginOptions.DeleteOutOfSyncDuplicates)),
+                    F(nameof(PluginOptions.DeleteOtherVersionSubtitles)),
+                    F(nameof(PluginOptions.DeleteWayOffSubtitles)),
+                    F(nameof(PluginOptions.WayOffUntaggedAudioIsEnglish)),
+                    F(nameof(PluginOptions.SkipExtractedTimingCopies)),
+                    F(nameof(PluginOptions.TimingVideosPerRun)),
+                    F(nameof(PluginOptions.TimingVideosAtOnce)),
+                    W(TimingWidget),
+                    H("OCR"),
                     F(nameof(PluginOptions.OcrPictureSubtitles)),
                     F(nameof(PluginOptions.OcrExistingFile)),
                     F(nameof(PluginOptions.OfferOcrInSubtitleSearch)),
@@ -165,7 +177,12 @@ namespace Emby.Subremover
             else if (p.PropertyType.IsEnum)
             {
                 dto.Kind = "select";
-                dto.Options = Enum.GetNames(p.PropertyType).Select(v => new OptionDto { Value = v, Name = Words(v) }).ToList();
+                // A value's [Description] is its label; otherwise its name in words.
+                dto.Options = Enum.GetNames(p.PropertyType).Select(v => new OptionDto
+                {
+                    Value = v,
+                    Name = p.PropertyType.GetField(v)?.GetCustomAttribute<DescriptionAttribute>()?.Description ?? Words(v)
+                }).ToList();
             }
             else if (source != null)
             {

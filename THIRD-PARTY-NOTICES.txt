@@ -3,7 +3,7 @@ Third-party notices for Emby.Subremover
 
 src/Emby.Subremover/Resources/english-words.txt.gz
 --------------------------------------------------
-The English word list used to choose between OCR readings is 2of12inf from
+The English word list used to choose between OCR readings and to check that downloaded subtitles are really English is 2of12inf from
 12dicts 6.0.2 by Alan Beale (http://wordlist.aspell.net/12dicts/), lowercased
 and with its markers removed. 2of12inf is derived from Kevin Atkinson's AGID
 list, which carries the following copyright notices:

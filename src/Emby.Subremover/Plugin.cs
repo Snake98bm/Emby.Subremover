@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -137,18 +138,58 @@ namespace Emby.Subremover
 
         private readonly object _hashLock = new object();
 
+        // "Start over" was clicked for the next hash run: forget where a stopped one got to.
+        private bool _hashStartOver;
+
+        internal bool TakeHashStartOver()
+        {
+            lock (_hashLock)
+            {
+                var startOver = _hashStartOver;
+                _hashStartOver = false;
+                return startOver;
+            }
+        }
+
         private IScheduledTaskWorker HashTaskWorker() =>
             _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is HashSubtitlesTask);
 
+        internal TaskProgressStore ProgressStore => new TaskProgressStore(_applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, _applicationHost.Resolve<IJsonSerializer>());
+
+        /// <summary>Where a stopped Count (true) or Download (false) got to, or null.</summary>
+        internal TaskProgress StoppedHashRun(bool countOnly) => HashSubtitlesTask.Stopped(ProgressStore, Options, countOnly);
+
+        /// <param name="startOver">Forget where a stopped run of this kind got to; otherwise it carries on from there.</param>
         /// <returns>The status line to show after "Count" or "Download hash-matched subtitles".</returns>
-        internal StatusItem StartHashRun(bool countOnly)
+        internal StatusItem StartHashRun(bool countOnly, bool startOver = false)
         {
             var worker = HashTaskWorker();
             if (worker != null && worker.State != TaskState.Idle) return HashStatus();
-            lock (_hashLock) _hashRunMode = countOnly;
+            var stopped = startOver ? null : StoppedHashRun(countOnly);
+            lock (_hashLock)
+            {
+                _hashRunMode = countOnly;
+                _hashStartOver = startOver;
+            }
             _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<HashSubtitlesTask>();
-            return new StatusItem("Hash-matched subtitles", $"{(countOnly ? "Counting" : "Downloading")} started at {DateTime.Now:HH:mm}. " +
-                                                             "The result shows here and in its log.", ItemStatus.InProgress);
+            var what = countOnly ? "Counting" : "Downloading";
+            return new StatusItem("Hash-matched subtitles",
+                (stopped != null ? $"{what} carries on ({stopped.Describe()})" : $"{what} started") + $" at {DateTime.Now:HH:mm}. " +
+                "The result shows here and in its log.", ItemStatus.InProgress);
+        }
+
+        /// <summary>"Running – 19% done. Last time: Count finished 16 Nov 05:30: ..." while a task runs.</summary>
+        internal static string WithLast(string running, string last) =>
+            string.IsNullOrEmpty(last) ? running : running + ". Last time: " + last;
+
+        /// <summary>"Count was stopped (1,234 of 3,026 videos done, stopped 16 Nov 09:40): Count carries on from there
+        /// unless Start over is ticked." Null when nothing was stopped.</summary>
+        internal static string StoppedNote(params (string Button, TaskProgress Progress)[] runs)
+        {
+            var stopped = runs.Where(r => r.Progress != null).ToList();
+            if (stopped.Count == 0) return null;
+            return string.Join(" ", stopped.Select(r =>
+                $"{r.Button} was stopped ({r.Progress.Describe()}): {r.Button} carries on from there unless Start over is ticked."));
         }
 
         internal StatusItem HashStatus()
@@ -158,12 +199,13 @@ namespace Emby.Subremover
             {
                 var worker = HashTaskWorker();
                 if (worker?.State == TaskState.Running)
-                    return new StatusItem(caption, worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", ItemStatus.InProgress);
+                    return new StatusItem(caption, WithLast(worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", HashSubtitlesTask.LastResult), ItemStatus.InProgress);
                 if (worker?.State == TaskState.Cancelling) return new StatusItem(caption, "Stopping…", ItemStatus.Warning);
                 var last = HashSubtitlesTask.LastResult;
-                return last == null
-                    ? new StatusItem(caption, "Not run since Emby started.", ItemStatus.None)
-                    : new StatusItem(caption, last, last.Contains("Stopped") ? ItemStatus.Warning : ItemStatus.Succeeded);
+                var stopped = StoppedNote(("Count", StoppedHashRun(true)), ("Download", StoppedHashRun(false)));
+                if (last == null) return new StatusItem(caption, stopped ?? "Not run yet.", stopped != null ? ItemStatus.Warning : ItemStatus.None);
+                return new StatusItem(caption, last + (stopped != null ? " " + stopped : ""),
+                    last.Contains("Stopped") || stopped != null ? ItemStatus.Warning : ItemStatus.Succeeded);
             }
             catch (Exception ex)
             {
@@ -214,7 +256,7 @@ namespace Emby.Subremover
             {
                 var worker = AdTaskWorker();
                 if (worker?.State == TaskState.Running)
-                    return new StatusItem(AdCaption, worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", ItemStatus.InProgress);
+                    return new StatusItem(AdCaption, WithLast(worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", SubtitleAdsTask.LastResult), ItemStatus.InProgress);
                 if (worker?.State == TaskState.Cancelling) return new StatusItem(AdCaption, "Stopping…", ItemStatus.Warning);
                 // Queued by a button but not started yet: still in progress, so the page keeps checking.
                 bool queued;
@@ -227,12 +269,96 @@ namespace Emby.Subremover
                 if (queued) return new StatusItem(AdCaption, "Starting…", ItemStatus.InProgress);
                 var last = SubtitleAdsTask.LastResult;
                 return last == null
-                    ? new StatusItem(AdCaption, "Not run since Emby started.", ItemStatus.None)
+                    ? new StatusItem(AdCaption, "Not run yet.", ItemStatus.None)
                     : new StatusItem(AdCaption, last, last.StartsWith("Stopped") || last.StartsWith("Didn't") ? ItemStatus.Warning : ItemStatus.Succeeded);
             }
             catch (Exception ex)
             {
                 return new StatusItem(AdCaption, "Status unavailable: " + ex.Message, ItemStatus.Unknown);
+            }
+        }
+
+        // The button pressed for the next "Fix subtitle file timing" run: true = scan run; null = scheduled run.
+        private bool? _timingRunMode;
+        private DateTime _timingQueuedUtc;
+        private readonly object _timingLock = new object();
+
+        internal bool? TakeTimingRunMode()
+        {
+            lock (_timingLock)
+            {
+                var mode = _timingRunMode;
+                _timingRunMode = null;
+                return mode;
+            }
+        }
+
+        private IScheduledTaskWorker TimingTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is SubtitleTimingTask);
+
+        internal const string TimingCaption = "Subtitle file timing";
+
+        // "Start over" was ticked for the next timing run.
+        private bool _timingStartOver;
+
+        internal bool TakeTimingStartOver()
+        {
+            lock (_timingLock)
+            {
+                var startOver = _timingStartOver;
+                _timingStartOver = false;
+                return startOver;
+            }
+        }
+
+        /// <summary>Where a stopped scan run (true) or fix (false) got to, or null.</summary>
+        internal TaskProgress StoppedTimingRun(bool testOnly) => SubtitleTimingTask.Stopped(ProgressStore, Options, testOnly);
+
+        /// <param name="startOver">Forget where a stopped run got to and measure every file again, even ones found good before.</param>
+        /// <returns>The status line to show after "Scan run" or "Fix timing now".</returns>
+        internal StatusItem StartTimingRun(bool testOnly, bool startOver = false)
+        {
+            var worker = TimingTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return TimingStatus();
+            var stopped = startOver ? null : StoppedTimingRun(testOnly);
+            lock (_timingLock)
+            {
+                _timingRunMode = testOnly;
+                _timingStartOver = startOver;
+                _timingQueuedUtc = DateTime.UtcNow;
+            }
+            SubtitleTimingTask.LastLogName = null;
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<SubtitleTimingTask>();
+            var what = testOnly ? "Scan run" : "Fixing";
+            return new StatusItem(TimingCaption,
+                (stopped != null ? $"{what} carries on ({stopped.Describe()})" : $"{what} started") + $" at {DateTime.Now:HH:mm}. " +
+                "The result shows here and in its log.", ItemStatus.InProgress);
+        }
+
+        internal StatusItem TimingStatus()
+        {
+            try
+            {
+                var worker = TimingTaskWorker();
+                if (worker?.State == TaskState.Running)
+                    return new StatusItem(TimingCaption, WithLast(worker.CurrentProgress.HasValue ? $"Running – {Math.Round(worker.CurrentProgress.Value)}% done" : "Running", SubtitleTimingTask.LastResult), ItemStatus.InProgress);
+                if (worker?.State == TaskState.Cancelling) return new StatusItem(TimingCaption, "Stopping…", ItemStatus.Warning);
+                bool queued;
+                lock (_timingLock)
+                {
+                    if (_timingRunMode != null && DateTime.UtcNow - _timingQueuedUtc > TimeSpan.FromMinutes(2)) _timingRunMode = null;
+                    queued = _timingRunMode != null;
+                }
+                if (queued) return new StatusItem(TimingCaption, "Starting…", ItemStatus.InProgress);
+                var last = SubtitleTimingTask.LastResult;
+                var stopped = StoppedNote(("Scan run", StoppedTimingRun(true)), ("Fix timing now", StoppedTimingRun(false)));
+                if (last == null) return new StatusItem(TimingCaption, stopped ?? "Not run yet.", stopped != null ? ItemStatus.Warning : ItemStatus.None);
+                return new StatusItem(TimingCaption, last + (stopped != null && !last.Contains(" paused ") ? " " + stopped : ""),
+                    last.StartsWith("Stopped") || last.StartsWith("Didn't") || stopped != null ? ItemStatus.Warning : ItemStatus.Succeeded);
+            }
+            catch (Exception ex)
+            {
+                return new StatusItem(TimingCaption, "Status unavailable: " + ex.Message, ItemStatus.Unknown);
             }
         }
 
@@ -243,13 +369,19 @@ namespace Emby.Subremover
         /// Every video with a backup, newest first so what was just changed is at the top, or why the Restore button won't.
         /// The path filter isn't used: the ticks on the list decide what's restored.
         /// </summary>
-        internal (string Refusal, List<BackupEntry> Backups) RestorePlan(string show = null)
+        /// <param name="why">A <see cref="Core.BackupReasons"/> value; "any" or empty for every reason.</param>
+        /// <returns>Also every backup of this kind before the reason filter, for the reason list's counts.</returns>
+        internal (string Refusal, List<BackupEntry> Backups, List<BackupEntry> OfThisKind) RestorePlan(string show = null, string why = null)
         {
             var busy = _applicationHost.Resolve<ITaskManager>().ScheduledTasks
-                .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask || w.ScheduledTask is SubtitleAdsTask)
+                .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask || w.ScheduledTask is SubtitleAdsTask || w.ScheduledTask is SubtitleTimingTask)
                           && w.State != TaskState.Idle);
-            var backups = NewestFirst(OfKind(_state.Load().Backups, show));
-            return (RestoreRefusal(busy, backups.Count, show), backups);
+            var ofKind = OfKind(_state.Load().Backups, show).ToList();
+            var backups = NewestFirst(Core.BackupReasons.Filter(ofKind, why));
+            var refusal = RestoreRefusal(busy, backups.Count, show);
+            // Backups of this kind, just none for that reason: say so, rather than "no backups".
+            if (!busy && backups.Count == 0 && ofKind.Count > 0) refusal = "There are no backups made for that reason.";
+            return (refusal, backups, ofKind);
         }
 
         /// <summary>The restore list's "Show": "videos", "subtitles", or anything else for all backups.</summary>
@@ -282,6 +414,51 @@ namespace Emby.Subremover
             return new StatusItem(RestoreCaption,
                 $"Restoring {chosen.Count} video{(chosen.Count == 1 ? "" : "s")}, started at {DateTime.Now:HH:mm}. Its log is on the Logs tab.", ItemStatus.InProgress);
         }
+
+        /// <summary>
+        /// Deletes the chosen backups for good: the backup file, and its line on the restore list. The original stays as it
+        /// is now (changed). Runs here, not as a task: deleting files is quick. Only while nothing else is changing the record.
+        /// </summary>
+        internal StatusItem DeleteBackups(IList<BackupEntry> chosen)
+        {
+            if (!TaskGate.TryEnter()) return new StatusItem(RestoreCaption, "Nothing deleted: another SubRemover task is going. Try again when it has finished.", ItemStatus.Warning);
+            try
+            {
+                var state = _state.Load();
+                int deleted = 0, gone = 0, failed = 0;
+                var log = _applicationHost.Resolve<ILogManager>().GetLogger("SubRemover");
+                foreach (var backup in chosen)
+                {
+                    var entry = state.Backups.FirstOrDefault(b => string.Equals(b.BackupPath, backup.BackupPath, StringComparison.OrdinalIgnoreCase)
+                                                                  && string.Equals(b.OriginalPath, backup.OriginalPath, StringComparison.OrdinalIgnoreCase));
+                    if (entry == null) continue;
+                    try
+                    {
+                        if (File.Exists(entry.BackupPath)) { File.Delete(entry.BackupPath); deleted++; }
+                        else gone++;
+                        state.Backups.Remove(entry);
+                        log.Info("SubRemover: deleted the backup {0} of {1} (asked for on the restore list)", entry.BackupPath, entry.OriginalPath);
+                    }
+                    catch (Exception ex)
+                    {
+                        failed++;
+                        log.Error("SubRemover: couldn't delete the backup {0}: {1}", entry.BackupPath, ex.Message);
+                    }
+                }
+                _state.Save(state);
+                var text = $"Deleted {deleted} backup{(deleted == 1 ? "" : "s")}" +
+                           (gone > 0 ? $"; {gone} {(gone == 1 ? "was" : "were")} already gone and came off the list" : "") +
+                           (failed > 0 ? $"; {failed} couldn't be deleted (see Emby's log)" : "") + ". Those files can't be restored now.";
+                return new StatusItem(RestoreCaption, text, failed > 0 ? ItemStatus.Warning : ItemStatus.Succeeded);
+            }
+            finally
+            {
+                TaskGate.Exit();
+            }
+        }
+
+        /// <summary>The word to type before backups are deleted; any capitals.</summary>
+        internal static bool IsDeleteConfirmed(string typed) => string.Equals((typed ?? "").Trim(), "delete", StringComparison.OrdinalIgnoreCase);
 
         public const int RestoreListLimit = 200;
 
@@ -322,12 +499,24 @@ namespace Emby.Subremover
             }
         }
 
+        /// <summary>"1,153 videos and 49 subtitle files have a backup."</summary>
+        internal static string BackupCountText(int videos, int subtitles)
+        {
+            string Part(int n, string one, string many) => n.ToString("N0", CultureInfo.InvariantCulture) + " " + (n == 1 ? one : many);
+            if (videos == 0 && subtitles == 0) return "No backups.";
+            var parts = new List<string>();
+            if (videos > 0) parts.Add(Part(videos, "video", "videos"));
+            if (subtitles > 0) parts.Add(Part(subtitles, "subtitle file", "subtitle files"));
+            return string.Join(" and ", parts) + (videos + subtitles == 1 ? " has a backup." : " have a backup.");
+        }
+
         internal string BackupCountText()
         {
             try
             {
-                var count = _state.Load().Backups.Count;
-                return count == 1 ? "1 video has a backup." : $"{count} videos have a backup.";
+                var backups = _state.Load().Backups;
+                var subtitles = backups.Count(Core.SubtitleAdFiles.IsSubtitleBackup);
+                return BackupCountText(backups.Count - subtitles, subtitles);
             }
             catch (Exception ex)
             {

@@ -69,6 +69,12 @@ namespace Emby.Subremover.Core
         /// <summary>The ad list and switches <see cref="AdChecked"/> was made with; a change checks every file again.</summary>
         public string AdRulesSignature { get; set; }
 
+        /// <summary>Subtitle files whose timing was checked, as they were then, so later runs only measure new or changed ones.</summary>
+        public Dictionary<string, FileStamp> TimingChecked { get; set; } = new Dictionary<string, FileStamp>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>The timing settings <see cref="TimingChecked"/> was made with; a change checks every file again.</summary>
+        public string TimingSignature { get; set; }
+
         private HashSet<string> _madeFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         /// <summary>
@@ -168,6 +174,7 @@ namespace Emby.Subremover.Core
                 state.Restored = state.Restored ?? new List<string>();
                 state.OcrFiles = new Dictionary<string, OcrRecord>(state.OcrFiles ?? new Dictionary<string, OcrRecord>(), StringComparer.OrdinalIgnoreCase);
                 state.AdChecked = new Dictionary<string, FileStamp>(state.AdChecked ?? new Dictionary<string, FileStamp>(), StringComparer.OrdinalIgnoreCase);
+                state.TimingChecked = new Dictionary<string, FileStamp>(state.TimingChecked ?? new Dictionary<string, FileStamp>(), StringComparer.OrdinalIgnoreCase);
                 return state;
             }
         }

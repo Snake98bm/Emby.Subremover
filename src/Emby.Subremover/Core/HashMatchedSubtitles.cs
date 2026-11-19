@@ -67,6 +67,9 @@ namespace Emby.Subremover.Core
 
         /// <summary>Subtitle files downloaded because they matched this hash.</summary>
         public List<string> Downloaded { get; set; } = new List<string>();
+        /// <summary>Downloads deleted straight away because their text wasn't the language asked for; they count toward
+        /// the daily limit too.</summary>
+        public int Rejected { get; set; }
     }
 
     /// <summary>
@@ -90,7 +93,7 @@ namespace Emby.Subremover.Core
 
         /// <summary>Subtitle files downloaded on this UTC day (the day providers such as OpenSubtitles count by), by either plugin.</summary>
         public int DownloadsOn(DateTime utcDay) =>
-            Load().Values.Where(r => r.CheckedUtc.Date == utcDay.Date).Sum(r => r.Downloaded?.Count ?? 0);
+            Load().Values.Where(r => r.CheckedUtc.Date == utcDay.Date).Sum(r => (r.Downloaded?.Count ?? 0) + r.Rejected);
 
         public Dictionary<string, OriginalHash> Load()
         {
@@ -295,29 +298,56 @@ namespace Emby.Subremover.Core
 
                 foreach (var language in languages)
                 {
-                    var best = (await _subtitles.SearchSubtitles(item, language, true, false, null, ct).ConfigureAwait(false) ?? Array.Empty<MediaBrowser.Model.Providers.RemoteSubtitleInfo>())
+                    var matches = (await _subtitles.SearchSubtitles(item, language, true, false, null, ct).ConfigureAwait(false) ?? Array.Empty<MediaBrowser.Model.Providers.RemoteSubtitleInfo>())
                         .Where(r => r.IsHashMatch == true && r.IsForced != true && r.ProviderName != OcrProviderName)
                         .OrderBy(r => r.IsHearingImpaired == true)
                         .ThenByDescending(r => r.DownloadCount ?? 0)
-                        .FirstOrDefault();
+                        .ToList();
                     // A little room between requests: providers turn away clients that ask too fast.
                     await Task.Delay(TimeSpan.FromMilliseconds(500), ct).ConfigureAwait(false);
-                    if (best == null)
+                    // Uploaders sometimes file a subtitle under the wrong hash: one named for another title isn't taken,
+                    // and a download whose text isn't really this language (or is machine-translated) is deleted and the
+                    // next match tried, up to MaxTries downloads.
+                    var tries = 0;
+                    var any = false;
+                    foreach (var match in matches)
                     {
-                        _log.Debug($"{_plugin}: no hash-matched {language} subtitle for {path} (hash {record.Hash})");
-                        continue;
+                        var wrong = WrongTitle(item, match.Name);
+                        if (wrong != null)
+                        {
+                            _log.Info($"{_plugin}: skipped the hash-matched {match.ProviderName} {language} subtitle \"{match.Name}\" for {path}: " +
+                                      $"{wrong}, so it's probably for another video");
+                            continue;
+                        }
+                        any = true;
+                        var what = $"{match.ProviderName} {language} subtitle \"{match.Name}\"{(match.IsHearingImpaired == true ? " (SDH)" : "")}";
+                        if (mode == HashMode.CountOnly)
+                        {
+                            result.Found.Add(language);
+                            _log.Info($"{_plugin}: found the hash-matched {what} for {path} (not downloaded: count only)");
+                            break;
+                        }
+                        if (tries++ == MaxTries)
+                        {
+                            _log.Info($"{_plugin}: gave up on hash-matched {language} subtitles for {path} after {MaxTries} that weren't {language}");
+                            break;
+                        }
+                        var saved = await _subtitles.DownloadSubtitles(item, match.Id, ct).ConfigureAwait(false);
+                        var notLanguage = string.IsNullOrEmpty(saved) ? null : WrongText(saved, language);
+                        if (notLanguage != null)
+                        {
+                            record.Rejected++;
+                            TryDelete(saved);
+                            _log.Info($"{_plugin}: deleted the hash-matched {what} just downloaded for {path}: {notLanguage}");
+                            await Task.Delay(TimeSpan.FromMilliseconds(500), ct).ConfigureAwait(false);
+                            continue;
+                        }
+                        result.Found.Add(language);
+                        _log.Info($"{_plugin}: downloaded the hash-matched {what} for {path}" + (string.IsNullOrEmpty(saved) ? "" : " -> " + saved));
+                        if (!string.IsNullOrEmpty(saved)) record.Downloaded.Add(saved);
+                        break;
                     }
-
-                    result.Found.Add(language);
-                    var what = $"{best.ProviderName} {language} subtitle \"{best.Name}\"{(best.IsHearingImpaired == true ? " (SDH)" : "")}";
-                    if (mode == HashMode.CountOnly)
-                    {
-                        _log.Info($"{_plugin}: found the hash-matched {what} for {path} (not downloaded: count only)");
-                        continue;
-                    }
-                    var saved = await _subtitles.DownloadSubtitles(item, best.Id, ct).ConfigureAwait(false);
-                    _log.Info($"{_plugin}: downloaded the hash-matched {what} for {path}" + (string.IsNullOrEmpty(saved) ? "" : " -> " + saved));
-                    if (!string.IsNullOrEmpty(saved)) record.Downloaded.Add(saved);
+                    if (!any) _log.Debug($"{_plugin}: no hash-matched {language} subtitle for {path} (hash {record.Hash})");
                 }
                 finished = true;
             }
@@ -344,6 +374,33 @@ namespace Emby.Subremover.Core
             result.Downloaded.AddRange(record.Downloaded);
             return result;
         }
+
+        /// <summary>Downloads tried per language when they turn out not to be that language.</summary>
+        public const int MaxTries = 3;
+
+        private string WrongText(string savedPath, string language)
+        {
+            try
+            {
+                return SubtitleTextCheck.WhyNot(SubtitleTextCheck.ReadText(savedPath), language);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug($"{_plugin}: couldn't read the downloaded {savedPath} to check its language: {ex.Message}");
+                return null;
+            }
+        }
+
+        private void TryDelete(string path)
+        {
+            try { File.Delete(path); }
+            catch (Exception ex) { _log.Warn($"{_plugin}: couldn't delete {path}: {ex.Message}"); }
+        }
+
+        private static string WrongTitle(BaseItem item, string releaseName) =>
+            item is MediaBrowser.Controller.Entities.TV.Episode episode
+                ? HashMatchTitle.WhyNotEpisode(releaseName, episode.ParentIndexNumber, episode.IndexNumber)
+                : HashMatchTitle.WhyNotMovie(releaseName, item.Name, item.ProductionYear);
 
         private bool HasProvider(BaseItem item)
         {
