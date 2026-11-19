@@ -151,7 +151,10 @@ namespace Emby.Subremover
                 var languages = HashMatchedSubtitles.LanguagesToSearch(settings.KeepLanguages,
                     before.streams.Where(s => s.IsSubtitle && SubtitlePlanner.IsTextCodec(s.codec_name)).Select(s => s.Language),
                     ExistingSubtitles.Find(path, new string[0]).Keys);
-                var lookup = await _hashSubtitles.Lookup(item, languages, options.DryRun ? HashMode.LogOnly : HashMode.Download, ct, options.HashDownloadsPerDay).ConfigureAwait(false);
+                // Test mode only logs it, unless "...but still download hash-matched subtitles" is on: then the subtitles
+                // come down now, while the video is still the original, so a later real run can't miss them.
+                var mode = options.ChangesSubtitleFiles ? HashMode.Download : HashMode.LogOnly;
+                var lookup = await _hashSubtitles.Lookup(item, languages, mode, ct, options.HashDownloadsPerDay).ConfigureAwait(false);
                 if (lookup.Check == HashCheck.TryLater) return Checked.Finished(Outcome.NothingToDo);
                 if (lookup.Downloaded.Count > 0) plan = MakePlan();
             }

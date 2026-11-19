@@ -28,6 +28,7 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly SearchOcrStore _searchOcr;
         private readonly CheckpointStore _checkpoints;
         private readonly Func<ILogger, MediaProcessor> _newProcessor;
+        private readonly FfmpegRunner _runner;
         private ILogger _log;
 
         public RemoveSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
@@ -40,6 +41,7 @@ namespace Emby.Subremover.ScheduledTasks
             _logDirectory = appPaths.LogDirectoryPath;
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
             var runner = FfmpegRunner.FromEmby(ffmpegManager);
+            _runner = runner;
             var tessdata = new Tessdata(Path.Combine(appPaths.DataPath, "subremover"));
             _searchOcr = new SearchOcrStore(appPaths.PluginConfigurationsPath, json);
             _checkpoints = new CheckpointStore(appPaths.PluginConfigurationsPath, json);
@@ -266,6 +268,7 @@ namespace Emby.Subremover.ScheduledTasks
             _checkpoints.Delete();
 
             if (options.RemoveSubtitleAds) RemoveSubtitleAds(options, state, checkedVideos, cancellationToken);
+            if (options.FixSubtitleTiming) await FixSubtitleTiming(options, state, checkedVideos, cancellationToken).ConfigureAwait(false);
 
             CleanOldBackups(options, state);
 
@@ -381,12 +384,13 @@ namespace Emby.Subremover.ScheduledTasks
         }
 
         // "Remove ads from subtitle files": the .srt files of the videos this run checked, only those new or changed since
-        // they were last checked. Test mode only logs what would go.
+        // they were last checked. Test mode only logs what would go, unless it lets subtitle files be cleaned up.
         private void RemoveSubtitleAds(PluginOptions options, SubremoverState state, IEnumerable<string> videos, CancellationToken ct)
         {
+            var testOnly = !options.ChangesSubtitleFiles;
             var rules = options.AdRules();
             foreach (var problem in rules.Problems) _log.Warn($"SubRemover: 'Text to remove' (subtitle files): {problem}");
-            var files = new SubtitleAdFiles(rules, options.DryRun, options.BackupMode, options.BackupFolder, _log);
+            var files = new SubtitleAdFiles(rules, testOnly, options.BackupMode, options.BackupFolder, _log);
             files.Begin(state);
             var looked = 0;
             foreach (var video in videos)
@@ -402,8 +406,38 @@ namespace Emby.Subremover.ScheduledTasks
                 }
             }
             if (looked > 0 || files.Failed > 0)
-                _log.Info("SubRemover: ads in subtitle files" + (options.DryRun ? " (test mode)" : "") + ": " + files.Describe());
-            if (!options.DryRun) _store.Save(state);
+                _log.Info("SubRemover: ads in subtitle files" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
+            if (!testOnly) _store.Save(state);
+        }
+
+        // "Fix subtitle file timing": the .srt files of the videos this run checked, only videos with a file new or changed
+        // since it was last measured (reading the audio is the slow part). Test mode only logs what it would do, unless it
+        // lets subtitle files be cleaned up.
+        private async Task FixSubtitleTiming(PluginOptions options, SubremoverState state, IEnumerable<string> videos, CancellationToken ct)
+        {
+            var testOnly = !options.ChangesSubtitleFiles;
+            var files = new SubtitleTimingFiles(_runner, testOnly, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles, options.BackupMode, options.BackupFolder, _log, options.DeleteWayOffSubtitles);
+            files.SkipExtracted = options.SkipExtractedTimingCopies;
+            files.Begin(state);
+            foreach (var video in videos)
+            {
+                ct.ThrowIfCancellationRequested();
+                try
+                {
+                    await files.Check(video, state, true, ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _log.Error($"SubRemover: couldn't check the subtitle timing of {video}: {ex.Message}");
+                }
+            }
+            if (files.FilesChecked > 0 || files.Failed > 0)
+                _log.Info("SubRemover: subtitle file timing" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
+            if (!testOnly) _store.Save(state);
         }
 
         private void CleanOldBackups(PluginOptions options, SubremoverState state)

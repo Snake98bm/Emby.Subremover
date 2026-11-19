@@ -20,6 +20,12 @@ namespace Emby.Subremover
             (SettingsTabId.Run, "Test mode (dry run)",
                 "When on, nothing is changed: each run only writes to its log what it WOULD do. Leave it on for your first run and turn it " +
                 "off when the log looks right. Test mode checks the same videos a real run would."),
+            (SettingsTabId.Run, "...but still download hash-matched subtitles and clean up subtitle files",
+                "Lets Test mode cover only the videos. Videos are still never changed, but the scheduled Download hash-matched " +
+                "subtitles task downloads perfect matches (up to the daily limit); a test run downloads them too for each video it " +
+                "would change, first, while the video is still the original; and runs and the scheduled tasks take ads out of " +
+                ".srt files and fix their timing, when Remove ads from subtitle files and Fix subtitle file timing are on. Each " +
+                "changed .srt file is backed up first, so it's on the restore list."),
             (SettingsTabId.Run, "Libraries to process",
                 "Only videos in the ticked libraries are checked."),
             (SettingsTabId.Run, "Max videos to change per run",
@@ -121,7 +127,12 @@ namespace Emby.Subremover
                 "in the player."),
             (SettingsTabId.SubtitleFiles, "Download hash-matched subtitles before changing a video",
                 "Emby's subtitle downloaders (such as OpenSubtitles) find a perfect match by the video's hash, and changing the video " +
-                "changes the hash. So before a video is changed for the first time, SubRemover saves its original hash and asks Emby's " +
+                "changes the hash. Uploaders sometimes file a subtitle under the wrong hash, so a match whose name is for another " +
+                "title (another film, the first film for its sequel, another year, another episode) is skipped and logged. " +
+                "Each download is also read: one whose text is another language, or (English) machine-translated with another " +
+                "language's words all through it, is deleted straight away and the next match tried, up to 3 per language; " +
+                "those count toward the daily limit. " +
+                "Before a video is changed for the first time, SubRemover saves its original hash and asks Emby's " +
                 "downloaders for perfect matches, but only when the video has no built-in text subtitle (.srt-like) in a language you " +
                 "keep or with no language set: then each language you keep that has no subtitle file is looked up. The best match is saved the way Emby's own search saves it. If the search fails, the " +
                 "video is left unchanged for the next run. AudioRemover does the same before it changes a video SubRemover hasn't, so " +
@@ -129,7 +140,9 @@ namespace Emby.Subremover
                 "looked up. After a failed search nothing more is asked for an hour. To get them for the whole library before any video is changed, use the buttons: Count hash-matched " +
                 "subtitles asks the downloaders and downloads nothing; Download hash-matched subtitles saves them and every video's " +
                 "original hash. Neither changes a video. A download run stops at the daily limit or when the downloader refuses " +
-                "and carries on where it stopped next time. Also under Scheduled Tasks → SubRemover, where it follows Test mode."),
+                "and carries on where it stopped next time. Count and Download both save where they got to: one that was stopped or " +
+                "cut off by an Emby restart carries on next time, with its totals so far; tick Start over to begin again. Also under " +
+                "Scheduled Tasks → SubRemover, where it follows Test mode."),
             (SettingsTabId.SubtitleFiles, "...at most this many downloads a day",
                 "Caps the hash-matched subtitles downloaded each day, by SubRemover and AudioRemover together, counted by the UTC day " +
                 "the way OpenSubtitles counts. It leaves the rest of the downloader's allowance (20 a day on a free OpenSubtitles " +
@@ -152,7 +165,9 @@ namespace Emby.Subremover
             (SettingsTabId.SubtitleFiles, "...also remove \"Subtitles by\" and \"Synced by\" credits",
                 "Lines that start with a credit: \"Subtitles by…\", \"Sync and corrections by…\", \"Resync by…\", \"Ripped by…\", " +
                 "\"Created and Encoded by…\", \"Synchro: …\", after any '-', '=' or '[' in front. Only at the start of a line, so " +
-                "dialogue like \"He was corrected by his teacher\" stays."),
+                "dialogue like \"He was corrected by his teacher\" stays. Also an uploader's contact line anywhere in the file: one with " +
+                "an e-mail address (name@site.com) or an international phone number (+ and 10 or more digits), which dialogue never " +
+                "reads out in full."),
             (SettingsTabId.SubtitleFiles, "...also remove TV captioning credits",
                 "The credits broadcast captions end with, like \"Captioned by Media Access Group at WGBH access.wgbh.org\" or " +
                 "\"Captioning sponsored by …\". They're part of the original captions, not ads, so they stay unless this is on."),
@@ -165,10 +180,80 @@ namespace Emby.Subremover
                 "web or e-mail address, or a credit-like line at the start or end, in at least two different films or shows. One " +
                 "show's own plug for its website isn't suggested. Tick the suggestions you want, click Add to the list, then " +
                 "Save. Also under Scheduled Tasks → SubRemover, where it follows Test mode."),
-            (SettingsTabId.SubtitleFiles, "Experimental: convert picture subtitles to text (OCR)",
+            (SettingsTabId.SubtitleFiles, "Fix subtitle file timing",
+                "During runs, measures the .srt files of the videos the run checked against the speech in the video (the centre channel " +
+                "of 5.1 and 7.1 audio, where films put the dialogue) and finds how far each file is off. A file that is off by the " +
+                "same amount from start to end gets every cue moved by that amount; its text and cue lengths stay as they were. " +
+                "It never stretches a file: one made for another frame rate or another cut, whose start, middle and end are off by " +
+                "different amounts, is left alone and named in the log. Offsets under 0.3 s are left too. Reading a video's audio " +
+                "takes a while, so a run only does it for videos with a subtitle file that's new or changed since it was last " +
+                "checked. Each changed file is backed up first and shows on the restore list. OCR files are left alone."),
+            (SettingsTabId.SubtitleFiles, "...delete an out-of-sync copy when another in the same language is in sync",
+                "When a video has several regular subtitle files in one language, e.g. 'Movie.en.srt' and 'Movie.eng.srt', and one " +
+                "of them is in sync, the ones that are off (or drift, or don't match the speech) are deleted, backed up first, rather " +
+                "than moved. Files named or written as SDH, forced, commentary or audio description are never deleted this way: " +
+                "they aren't copies of the regular one. When no copy is in sync, each one that can be is moved. Off: the off copy " +
+                "is moved instead."),
+            (SettingsTabId.SubtitleFiles, "...when none are in sync, keep the best copy and delete the worse ones",
+                "An extended cut, director's cut or theatrical cut has scenes the other doesn't, and a PAL release runs faster than a " +
+                "film one, so a subtitle made for another version lines up in one part of the video and not in another: its start, " +
+                "middle and end are off by different amounts, and moving the whole file can't fix it. When a language has several " +
+                "regular files and none are in sync, they're ranked: one that's off by one amount (it gets moved) beats one that " +
+                "drifts, a smaller drift beats a bigger one, and any of those beats one that doesn't match the speech at all. With " +
+                "this on, the best stays and the drifting or unmatched ones are deleted, backed up first so they're on the restore " +
+                "list. The only file of a language is never deleted: a drift there is just logged, so you can look at it. SDH, " +
+                "forced, commentary and audio-description files are never deleted this way. When two videos in one folder share " +
+                "a name (Movie.mkv and Movie.mp4), they share their .srt files, which are then only measured, never moved or deleted."),
+            (SettingsTabId.SubtitleFiles, "...delete subtitle files that are way off",
+                "For a file that moving can't fix and that has no better copy to keep instead, so it's the only English file. Only " +
+                "English .srt files (regular or SDH; never forced, commentary or audio description), and only when the video's " +
+                "audio track is tagged English: the speech is what the file is measured against. Careful deletes a file whose " +
+                "start, middle and end are at least two of them more than 5 seconds off; Recommended does the same at 2 seconds " +
+                "(a file that's right for most of the video and only jumps near the end stays); Most also deletes files that " +
+                "don't match the speech at all (a match score under 3, where 6 is a match), which can also be a quiet mix or a " +
+                "music-heavy video, so check its Scan run first. Each file is backed up first and shows on the restore list. With " +
+                "an English file gone, Emby may download a better one the next time it refreshes the video. Scan run lists what " +
+                "would go; changing this setting doesn't need a new scan."),
+            (SettingsTabId.SubtitleFiles, "Scan run / Fix timing now",
+                "Go through the .srt files next to the videos in your libraries (and path filter). Scan run measures every file and " +
+                "changes nothing, whatever Test mode is set to: it lists each file and how far off it is in its log, and saves what " +
+                "it found for each one (how far off, and what Fix would do) as a plan. Fix moves and deletes as described above, " +
+                "backing each file up. It uses the plan for every video whose video and .srt files haven't changed since the scan, " +
+                "without reading its audio again, and measures only the others; it also skips files it measured before that " +
+                "haven't changed since (they were good, or it fixed them). Start over makes Fix ignore the plan and measure " +
+                "everything. Both save where they got to: a run that's stopped, cut off by an Emby restart, " +
+                "or paused by 'Videos per timing run' carries on from there next time, with its totals. Tick Start over to begin " +
+                "again and measure every file. Neither changes a video, and neither runs next to a run, a restore or the ads task. " +
+                "Also under Scheduled Tasks → SubRemover, where it follows Test mode."),
+            (SettingsTabId.SubtitleFiles, "...skip .srt files extracted from the video's own subtitles",
+                "When SubRemover extracts a built-in text subtitle to a file ('Extract kept text subtitles to .srt files'), it keeps a " +
+                "list of the files it wrote. Those are exact copies of the video's own track, so they can't be out of sync: with " +
+                "this on, they're taken as in sync without measuring, and a video whose only .srt files are such copies isn't read " +
+                "at all, which saves most of the time. They still count as the in-sync copy of their language, so an off-sync " +
+                "downloaded file next to one can still be deleted. Off: they're measured like any other file."),
+            (SettingsTabId.SubtitleFiles, "Videos per timing run",
+                "Reading a video's audio takes a while, so a whole library can take hours. Set a number to measure that many videos " +
+                "per click (or scheduled run); the next one carries on where it stopped. 0 does them all in one go."),
+            (SettingsTabId.SubtitleFiles, "Videos measured at once",
+                "How many videos' audio is read side by side (each at low priority). 4 suits most servers; more is faster if the " +
+                "server and the NAS keep up."),
+            (SettingsTabId.SubtitleFiles, "Convert picture subtitles to text (OCR)",
                 "Reads kept picture subtitles (PGS/DVD) with OCR and saves them as text next to the video, e.g. 'Movie.pgs.eng.srt'. The " +
                 "picture track stays in the video. Skipped when the video also has a text subtitle in that language, and for commentary. " +
                 "The language data (about 4 MB per language) is downloaded the first time. OCR can misread words."),
+            (SettingsTabId.SubtitleFiles, "How OCR text is cleaned up",
+                "Every OCR file goes through these fixes before it's saved. Timing (all languages): Blu-ray subtitles carry no end " +
+                "time, so each line ends when the screen clears, and the last one gets a few seconds; the empty 'clear' pictures are " +
+                "dropped; the same picture sent again a frame later becomes one subtitle. Two models (OCR model 'Both'): each line " +
+                "keeps the reading with fewer words that look misread, checked against an English word list; a tie keeps the one " +
+                "with more words. English only, each fix only where the misread can't be a real word: " +
+                "a capital I read as 1, l, |, / or ! ('1 don't' → 'I don't', 'l think' → 'I think', '/t' → 'It' or 'it' mid-sentence); " +
+                "'Is' in the middle of a sentence → 'is'; a capital K in 'Know' mid-sentence → 'know'; words with a 1 or | inside " +
+                "get the l, I, t or i that makes a known word ('wi1l' → 'will'); missing apostrophes in common words ('dont' → " +
+                "'don't'); 'So' read as '5o', 'S0', or '50' at the start of a sentence before a word a number can't come before " +
+                "('50 what?' → 'So what?', while 'going over 50' stays); music notes read as *, », J\", f or ¢ → ♪; sound " +
+                "descriptions with a misread bracket ('[ Door Opens /' → '[ Door Opens ]', '(Sighs]' → '[Sighs]'); double spaces. " +
+                "Spot one it misses? Note the line and what it should say: new fixes are added to this list."),
             (SettingsTabId.SubtitleFiles, "If the OCR subtitle file already exists",
                 "Keep existing leaves an OCR file from an earlier run alone. Replace makes it again, every run. Redo if made by an " +
                 "older OCR makes it again only when SubRemover's OCR has improved since (each version of the plugin that reads " +
@@ -198,7 +283,7 @@ namespace Emby.Subremover
                 "backups', so those videos can no longer be put back. Test mode only logs what it would delete. 0 keeps them " +
                 "forever. Subtitle-file backups have their own setting below."),
             (SettingsTabId.Backups, "Delete subtitle file backups older than (days)",
-                "Backups of .srt files that had ads taken out ('Movie.en.srt.subremover.bak' next to it, or in the backup folder). " +
+                "Backups of .srt files that had ads taken out, were moved to fix their timing or were deleted as an out-of-sync copy ('Movie.en.srt.subremover.bak' next to it, or in the backup folder). " +
                 "They're a few dozen KB each, so they can be kept much longer than video backups. 0 keeps them forever."),
             (SettingsTabId.Backups, "Restore originals from backups",
                 "Lists every video that has a backup, newest first, with nothing selected. 'Show' picks all backups, video files only, " +

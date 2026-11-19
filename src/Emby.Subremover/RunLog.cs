@@ -132,7 +132,12 @@ namespace Emby.Subremover
         {
             if (string.IsNullOrEmpty(fileName) || !ListFiles(directory).Contains(fileName)) return "No run log yet. Click Run now to create one.";
 
-            var text = ReadAll(directory, fileName);
+            return CutForDisplay(ReadAll(directory, fileName), maxChars);
+        }
+
+        /// <summary>The end of a long log, for the page's text box.</summary>
+        public static string CutForDisplay(string text, int maxChars = 200_000)
+        {
             return text.Length <= maxChars
                 ? text
                 : "… (start of the log cut off; open it in a new window for all of it)" + Environment.NewLine + text.Substring(text.Length - maxChars);

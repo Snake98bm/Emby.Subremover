@@ -87,6 +87,7 @@ define([], function () {
             view.querySelectorAll('.sr-panel').forEach(function (p) { p.classList.toggle('sr-active', p.getAttribute('data-panel') === id); });
             try { sessionStorage.setItem('subRemoverTab', id); } catch (e) { }
             if (id === 'Logs') loadLog(null);
+            if (id === 'Backups') loadReasons();
         }
 
         // ---------------------------------------------------------------- settings
@@ -259,7 +260,9 @@ define([], function () {
             function start(countOnly) {
                 save().then(function (ok) {
                     if (!ok) return;
-                    postJson('SubRemover/HashSubtitles', { CountOnly: countOnly }).then(function (s) {
+                    var over = el('srHashStartOver');
+                    postJson('SubRemover/HashSubtitles', { CountOnly: countOnly, StartOver: !!(over && over.checked) }).then(function (s) {
+                        if (over) over.checked = false;
                         showStatus(el('srHashStatus'), s);
                         pollHash({ State: 'InProgress' });
                     }, function (err) {
@@ -272,6 +275,8 @@ define([], function () {
                     h('button', { type: 'button', class: 'sr-btn', text: '🔍 Count hash-matched subtitles', onclick: function () { start(true); } }),
                     h('button', { type: 'button', class: 'sr-btn', text: '⬇ Download hash-matched subtitles', onclick: function () { start(false); } })
                 ]),
+                h('label', { class: 'sr-check' }, [h('input', { type: 'checkbox', id: 'srHashStartOver' }),
+                    h('span', { text: 'Start over (otherwise a stopped Count or Download carries on where it got to)' })]),
                 h('div', { class: 'sr-muted', text: 'Goes through your libraries without changing any video. Count only asks the downloaders and downloads nothing. Run Download before SubRemover or AudioRemover change your videos.' }),
                 box
             ]);
@@ -374,6 +379,61 @@ define([], function () {
             }, 4000);
         }
 
+        // "Timing of subtitle files": Scan run / Fix now.
+        function timingWidget() {
+            var box = h('div', { class: 'sr-status', id: 'srTimingStatus', role: 'status' });
+            var logLink = h('a', { class: 'sr-btn', id: 'srTimingLog', target: '_blank', rel: 'noopener', text: '📄 Open the log ↗', style: 'display:none' });
+            function start(testOnly) {
+                if (!testOnly && !window.confirm('Fix the timing of every .srt file next to the videos in your libraries? Files that are off get moved, and out-of-sync copies of a language that has an in-sync one get deleted. Each one is backed up first.')) return;
+                save().then(function (ok) {
+                    if (!ok) return;
+                    var over = el('srTimingStartOver');
+                    postJson('SubRemover/SubtitleTiming', { TestOnly: testOnly, StartOver: !!(over && over.checked) }).then(function (r) {
+                        if (over) over.checked = false;
+                        showTiming(r);
+                        pollTiming({ State: 'InProgress' });
+                    }, function (err) {
+                        errorText(err).then(function (t) { showStatus(el('srTimingStatus'), { Caption: 'Subtitle file timing', Text: 'Could not start: ' + t, State: 'Failed' }); });
+                    });
+                });
+            }
+            setTimeout(function () { showTiming(page.TimingStatus); }, 0);
+            return h('div', {}, [
+                h('div', { class: 'sr-buttons' }, [
+                    h('button', { type: 'button', class: 'sr-btn', text: '🔍 Scan run (changes nothing)', onclick: function () { start(true); } }),
+                    h('button', { type: 'button', class: 'sr-btn', text: '⏱ Fix timing now', onclick: function () { start(false); } }),
+                    logLink
+                ]),
+                h('label', { class: 'sr-check' }, [h('input', { type: 'checkbox', id: 'srTimingStartOver' }),
+                    h('span', { text: 'Start over: measure every file again, even ones found good before (otherwise a stopped run carries on, and Fix skips files already checked)' })]),
+                h('div', { class: 'sr-muted', text: 'Every .srt file next to the videos in your libraries, measured against the speech in the video. Only moves whole files, never stretches them. Scan run lists each file and how far off it is in its log, and saves that as a plan: Fix timing now then uses it straight away and only measures again the videos whose files changed since. Reading a video\'s audio is the slow part. No video is changed.' }),
+                box
+            ]);
+        }
+
+        function showTiming(r) {
+            var box = el('srTimingStatus');
+            if (!box || !r) return;
+            showStatus(box, r.Status);
+            var logLink = el('srTimingLog');
+            if (logLink) {
+                logLink.style.display = r.LogUrl ? '' : 'none';
+                if (r.LogUrl) logLink.href = r.LogUrl;
+            }
+        }
+
+        var timingTimer;
+        function pollTiming(status) {
+            clearTimeout(timingTimer);
+            if (!status || status.State !== 'InProgress') return;
+            timingTimer = setTimeout(function () {
+                getJson('SubRemover/SubtitleTiming/Status').then(function (r) {
+                    showTiming(r);
+                    pollTiming(r.Status);
+                }, function () { pollTiming(status); });
+            }, 4000);
+        }
+
         function quickSetupWidget() {
             return h('div', { class: 'sr-buttons' }, [
                 h('button', { type: 'button', class: 'sr-btn', text: 'Quick setup: English + no language', onclick: function () {
@@ -392,16 +452,22 @@ define([], function () {
             var status = h('div', { class: 'sr-status', id: 'srRestoreStatus', role: 'status' });
             var list = h('div', { id: 'srRestoreList' });
             var show = h('select', { id: 'srRestoreShow', title: 'Which backups to list', onchange: function () {
-                if (el('srRestoreList').childNodes.length) listBackups();   // the list is open: show it again with the new choice
+                // The list is open: show it again with the new choice; otherwise just fill in that kind's reasons.
+                if (el('srRestoreList').childNodes.length) listBackups(); else loadReasons();
             } }, [
                 h('option', { value: 'all', text: 'All backups' }),
                 h('option', { value: 'videos', text: 'Video files only' }),
                 h('option', { value: 'subtitles', text: 'Subtitle files (.srt) only' })
             ]);
+            // Filled with the reasons (and counts) the server finds once the list is shown.
+            var why = h('select', { id: 'srRestoreWhy', title: 'Why the backup was made', onchange: function () {
+                if (el('srRestoreList').childNodes.length) listBackups();
+            } }, [h('option', { value: 'any', text: 'Any reason' })]);
             return h('div', {}, [
                 count,
                 h('div', { class: 'sr-buttons' }, [
                     h('label', { class: 'sr-muted', text: 'Show' }), show,
+                    h('label', { class: 'sr-muted', text: 'Why' }), why,
                     h('button', { type: 'button', class: 'sr-btn', text: '↺ Restore originals from backups…', onclick: listBackups }),
                     h('span', { class: 'sr-muted', text: 'Lists the files with a backup to choose from. Nothing is restored until you confirm.' })
                 ]),
@@ -410,16 +476,39 @@ define([], function () {
             ]);
         }
 
+        // Fills the Why list with the reasons (and counts) for the chosen kind, without listing the backups.
+        function loadReasons() {
+            var whySelect = el('srRestoreWhy');
+            var showSelect = el('srRestoreShow');
+            if (!whySelect || !showSelect) return;
+            getJson('SubRemover/Backups', { Show: showSelect.value, Why: 'any' }).then(function (r) { fillReasons(whySelect, r.Reasons); }, function () { });
+        }
+
+        function fillReasons(whySelect, reasons) {
+            var keep = whySelect.value || 'any';
+            whySelect.innerHTML = '';
+            whySelect.appendChild(h('option', { value: 'any', text: 'Any reason' }));
+            (reasons || []).forEach(function (x) { whySelect.appendChild(h('option', { value: x.Value, text: x.Label + ' (' + x.Count + ')' })); });
+            whySelect.value = [].some.call(whySelect.options, function (o) { return o.value === keep; }) ? keep : 'any';
+        }
+
         function listBackups() {
             var status = el('srRestoreStatus');
             var list = el('srRestoreList');
             var show = el('srRestoreShow').value;
+            var whySelect = el('srRestoreWhy');
+            var why = whySelect.value || 'any';
             // what one row is, for the button and confirm texts
             var noun = show === 'videos' ? ['video', 'videos'] : show === 'subtitles' ? ['subtitle file', 'subtitle files'] : ['file', 'files'];
             list.innerHTML = '';
             showStatus(status, { Text: 'Looking for backups…', State: 'InProgress' });
-            getJson('SubRemover/Backups', { Show: show }).then(function (r) {
+            getJson('SubRemover/Backups', { Show: show, Why: why }).then(function (r) {
                 backupList = r;
+                // The reasons for this kind of backup, with counts; a reason that's gone falls back to "Any reason".
+                whySelect.innerHTML = '';
+                whySelect.appendChild(h('option', { value: 'any', text: 'Any reason' }));
+                (r.Reasons || []).forEach(function (x) { whySelect.appendChild(h('option', { value: x.Value, text: x.Label + ' (' + x.Count + ')' })); });
+                whySelect.value = [].some.call(whySelect.options, function (o) { return o.value === why; }) ? why : 'any';
                 if (r.Refusal) { showStatus(status, { Caption: 'Restore', Text: r.Refusal, State: 'Warning' }); return; }
                 showStatus(status, { Caption: 'Restore', State: 'Warning', Text:
                     'Tick the ' + noun[1] + ' to restore, then click Restore selected. Each one is replaced by the original from its backup, ' +
@@ -429,10 +518,13 @@ define([], function () {
 
                 var boxes = [];
                 var restoreBtn = h('button', { type: 'button', class: 'sr-btn sr-danger', text: 'Restore selected', disabled: true, onclick: restoreSelected });
+                var deleteBtn = h('button', { type: 'button', class: 'sr-btn', text: '🗑 Delete selected backups', disabled: true, onclick: deleteSelected });
                 function updateButton() {
                     var n = boxes.filter(function (b) { return b.checked; }).length;
                     restoreBtn.disabled = n === 0;
+                    deleteBtn.disabled = n === 0;
                     restoreBtn.textContent = n === 0 ? 'Restore selected' : n === 1 ? 'Restore this ' + noun[0] : 'Restore ' + n + ' ' + noun[1];
+                    deleteBtn.textContent = n === 0 ? '🗑 Delete selected backups' : n === 1 ? '🗑 Delete this backup' : '🗑 Delete ' + n + ' backups';
                     all.checked = n > 0 && n === boxes.length;
                 }
                 var all = h('input', { type: 'checkbox', title: 'Select all', onchange: function () {
@@ -459,7 +551,7 @@ define([], function () {
                     var what = picked.length === 1 ? 'this ' + noun[0] : 'these ' + picked.length + ' ' + noun[1];
                     if (!window.confirm('Restore ' + what + '? Each one is replaced by its original from the backup, undoing what SubRemover changed.')) return;
                     restoreBtn.disabled = true;
-                    postJson('SubRemover/Restore', { Key: backupList.Key, Indexes: picked.join(','), Show: show }).then(function (s) {
+                    postJson('SubRemover/Restore', { Key: backupList.Key, Indexes: picked.join(','), Show: show, Why: why }).then(function (s) {
                         showStatus(status, s);
                         list.innerHTML = '';
                     }, function (err) {
@@ -468,23 +560,72 @@ define([], function () {
                     });
                 }
 
-                list.appendChild(h('div', { class: 'sr-card' }, [table, h('div', { class: 'sr-buttons' }, [restoreBtn,
+                // Deleting a backup can't be undone, so the word has to be typed (any capitals); the server checks it too.
+                function deleteSelected() {
+                    var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.getAttribute('data-index'); });
+                    if (!picked.length) return;
+                    var what = picked.length === 1 ? 'this backup' : 'these ' + picked.length + ' backups';
+                    var typed = window.prompt('Delete ' + what + ' for good? The ' + (picked.length === 1 ? noun[0] : noun[1]) +
+                        ' stay as they are now, but can never be restored. Type Delete to confirm.', '');
+                    if (typed === null) return;
+                    if (typed.trim().toLowerCase() !== 'delete') {
+                        showStatus(status, { Caption: 'Restore', Text: 'Nothing deleted: type Delete to confirm.', State: 'Warning' });
+                        return;
+                    }
+                    deleteBtn.disabled = true;
+                    postJson('SubRemover/DeleteBackups', { Key: backupList.Key, Indexes: picked.join(','), Show: show, Why: why, Confirm: typed }).then(function (s) {
+                        showStatus(status, s);
+                        list.innerHTML = '';
+                        getJson('SubRemover/Page').then(function (p) { var c = el('srBackupCount'); if (c && p.BackupCount) c.textContent = p.BackupCount; });
+                    }, function (err) {
+                        errorText(err).then(function (t) { showStatus(status, { Caption: 'Restore', Text: 'Delete failed: ' + t, State: 'Failed' }); });
+                        deleteBtn.disabled = false;
+                    });
+                }
+
+                // More than 10 rows: the table scrolls in a box 10 rows high, so the buttons stay in reach.
+                var scroller = h('div', { class: 'sr-scroll' }, [table]);
+                list.appendChild(h('div', { class: 'sr-card' }, [scroller, h('div', { class: 'sr-buttons' }, [restoreBtn, deleteBtn,
                     h('button', { type: 'button', class: 'sr-btn', text: 'Cancel', onclick: function () { list.innerHTML = ''; showStatus(status, null); } })])]));
+                if (r.Items.length > 10) {
+                    var tenth = table.rows[10];   // rows[0] is the header
+                    scroller.style.maxHeight = (tenth.offsetTop + tenth.offsetHeight + 2) + 'px';
+                    scroller.style.overflowY = 'auto';
+                }
             }, function (err) {
                 errorText(err).then(function (t) { showStatus(status, { Caption: 'Restore', Text: 'Couldn\'t list the backups: ' + t, State: 'Failed' }); });
             });
         }
 
+        // The Logs tab's filter: value sent to the server, and its label (the count is added after each load).
+        var LOG_FILTERS = [
+            ['all', 'Everything'],
+            ['Videos', 'Videos (tracks removed or changed)'],
+            ['SubtitleFiles', 'Subtitle files (.srt: ads, timing, extracted)'],
+            ['HashDownloads', 'Hash-matched subtitle downloads'],
+            ['Ocr', 'OCR (picture subtitles to text)'],
+            ['problems', 'Problems (warnings and errors)']
+        ];
+
         function logsWidget() {
             var select = h('select', { id: 'srLogPick', onchange: function () { loadLog(select.value); } });
             (page.Logs || []).forEach(function (n) { select.appendChild(h('option', { value: n, text: n })); });
             if (!(page.Logs || []).length) select.appendChild(h('option', { value: '', text: 'No runs yet' }));
+            var show = h('select', { id: 'srLogShow', onchange: function () { loadLog(select.value); } });
+            LOG_FILTERS.forEach(function (f) { show.appendChild(h('option', { value: f[0], text: f[1] })); });
+            var details = h('input', { type: 'checkbox', id: 'srLogHideDetails', onchange: function () { loadLog(select.value); } });
             return h('div', {}, [
                 h('div', { class: 'sr-field' }, [
                     h('label', { for: 'srLogPick', text: 'Logs' }),
                     select,
                     h('div', { class: 'sr-help', text: 'Pick an older run to see its log.' })
                 ]),
+                h('div', { class: 'sr-field' }, [
+                    h('label', { for: 'srLogShow', text: 'Show' }),
+                    show,
+                    h('div', { class: 'sr-help', text: 'Only the lines about videos, subtitle files, downloads, OCR or problems. Open in a new window and Download always give the whole log.' })
+                ]),
+                h('label', { class: 'sr-check' }, [details, h('span', { text: 'Hide details (Debug lines: every video looked at, even when nothing was done)' })]),
                 h('div', { class: 'sr-buttons' }, [
                     h('a', { class: 'sr-btn', id: 'srLogOpen', target: '_blank', rel: 'noopener', text: 'Open in a new window ↗' }),
                     h('a', { class: 'sr-btn', id: 'srLogDownload', text: '⬇ Download' }),
@@ -498,8 +639,17 @@ define([], function () {
             var select = el('srLogPick');
             if (!select) return;
             // No name (opening the tab): the server sends the newest log, including runs since this page was opened.
-            getJson('SubRemover/LogView', { Name: name || '' }).then(function (r) {
+            var show = el('srLogShow');
+            var hide = el('srLogHideDetails');
+            getJson('SubRemover/LogView', { Name: name || '', Show: show ? show.value : 'all', HideDetails: !!(hide && hide.checked) }).then(function (r) {
                 el('srLogText').value = r.Text || '';
+                if (show && r.Counts) {
+                    [].forEach.call(show.options, function (o) {
+                        var f = LOG_FILTERS.filter(function (x) { return x[0] === o.value; })[0];
+                        var n = r.Counts[o.value];
+                        o.textContent = f[1] + (n === undefined ? '' : ' - ' + n);
+                    });
+                }
                 var has = !!r.Name;
                 [['srLogOpen', r.OpenUrl], ['srLogDownload', r.DownloadUrl]].forEach(function (x) {
                     var a = el(x[0]);
@@ -517,7 +667,7 @@ define([], function () {
             });
         }
 
-        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget };
+        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget, subTiming: timingWidget };
 
         // ---------------------------------------------------------------- draw
 
@@ -568,6 +718,7 @@ define([], function () {
                 pollIfRunning(p.Status);
                 pollHash(p.HashStatus);
                 pollAds(p.AdStatus && p.AdStatus.Status);
+                pollTiming(p.TimingStatus && p.TimingStatus.Status);
             }, function (err) {
                 errorText(err).then(function (t) { el('srLoadError').textContent = 'Couldn\'t load the settings: ' + t; });
             });

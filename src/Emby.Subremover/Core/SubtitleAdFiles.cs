@@ -131,20 +131,7 @@ namespace Emby.Subremover.Core
                     return;
                 }
 
-                var note = string.Format(BackupNote, result.Removed.Count, result.Removed.Count == 1 ? "" : "s");
-                lock (state)
-                {
-                    if (replaced.NewBackup != null)
-                    {
-                        replaced.NewBackup.Changes = new List<string> { note };
-                        state.Backups.Add(replaced.NewBackup);
-                    }
-                    else if (replaced.BackupPath != null)
-                    {
-                        var earlier = state.Backups.LastOrDefault(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase));
-                        if (earlier != null) earlier.Changes = (earlier.Changes ?? new List<string>()).Concat(new[] { note }).ToList();
-                    }
-                }
+                RecordBackup(state, path, replaced, string.Format(BackupNote, result.Removed.Count, result.Removed.Count == 1 ? "" : "s"));
                 Note(path, state);
                 _log.Info($"SubRemover: removed {result.Removed.Count} ad line{(result.Removed.Count == 1 ? "" : "s")} from {path}" +
                           (replaced.BackupPath != null ? $" (backup: {replaced.BackupPath})" : " (no backup kept)") + ":" + lines);
@@ -153,6 +140,27 @@ namespace Emby.Subremover.Core
             {
                 System.Threading.Interlocked.Increment(ref Failed);
                 _log.Error($"SubRemover: couldn't check {path} for ads: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Puts a subtitle file's new backup on the restore list with what was changed, or, when an older backup was kept
+        /// (it's closer to the original), adds the change to that one's notes.
+        /// </summary>
+        internal static void RecordBackup(SubremoverState state, string path, ReplaceResult replaced, string note)
+        {
+            lock (state)
+            {
+                if (replaced.NewBackup != null)
+                {
+                    replaced.NewBackup.Changes = new List<string> { note };
+                    state.Backups.Add(replaced.NewBackup);
+                }
+                else if (replaced.BackupPath != null)
+                {
+                    var earlier = state.Backups.LastOrDefault(b => string.Equals(b.OriginalPath, path, StringComparison.OrdinalIgnoreCase));
+                    if (earlier != null) earlier.Changes = (earlier.Changes ?? new List<string>()).Concat(new[] { note }).ToList();
+                }
             }
         }
 

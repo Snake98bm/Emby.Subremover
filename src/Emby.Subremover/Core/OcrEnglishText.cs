@@ -31,7 +31,14 @@ namespace Emby.Subremover.Core
         private static readonly Regex MusicStart = new Regex(@"^(\s*(?:-\s+)?)(?:J""|[fJ¢ƒ]|[-~_]?[»*~_]+[»*]?)(?=\s)", RegexOptions.Compiled);
         private static readonly Regex MusicEnd = new Regex(@"(?<=\S)\s+(?:J""|[»*¢ƒ]+)\s*$", RegexOptions.Compiled);
         private static readonly Regex SlashBeforeCloser = new Regex(@"(?<=[A-Za-z.!?])(\s*)[/|]\s*\]", RegexOptions.Compiled);
-        private static readonly Regex IAcronym = new Regex(@"(?<![\w.])1(?=\.[A-Z]\.)", RegexOptions.Compiled);
+        // "So" read as "5o", "S0" or "50" ("50 what are you saying?"). "5o" and "S0" are never numbers; "50" only becomes
+        // "So" at the start of a sentence before a word that can't follow a number, so "going over 50" and "50 people" stay.
+        private static readonly Regex SoMisread = new Regex(@"(?<![\w'’])(?:5[oO]|[Ss]0)(?![\w'’])", RegexOptions.Compiled);
+        private static readonly Regex FiftyAsSo = new Regex(
+            @"(?<=(?:^\s*(?:-\s*)?(?:<[^>]+>)?|[.!?]\s+))50(?=,?\s+(?:what|why|how|where|when|who|you|I|we|he|she|they|it|it's|that|that's|this|" +
+            @"do|did|does|don't|let's|now|then|tell|maybe|if|there|here|can|will|would|should|could|yeah|yes|no|um|uh|anyway|basically)\b)",
+            RegexOptions.Compiled);
+        private static readonly Regex IAcronym =new Regex(@"(?<![\w.])1(?=\.[A-Z]\.)", RegexOptions.Compiled);
 
         // "1" stays a number before these.
         private static readonly HashSet<string> NumberFollowers = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
@@ -85,6 +92,7 @@ namespace Emby.Subremover.Core
                     var line = FixI(KnowCapital.Replace(cue.Lines[i], "k"), apostrophe, unclosedSquare, unopenedSquare);
                     line = IBang.Replace(line, "I");
                     line = IsMidSentence.Replace(line, "is");
+                    line = FixSo(line);
                     line = MusicStart.Replace(line, "$1♪");
                     line = MusicEnd.Replace(line, " ♪");
                     line = FixMixedWords(line, vocabulary);
@@ -116,6 +124,13 @@ namespace Emby.Subremover.Core
             });
             line = IAcronym.Replace(line, "I");
             return line;
+        }
+
+        /// <summary>"So" read as "5o", "S0" or (starting a sentence) "50".</summary>
+        public static string FixSo(string line)
+        {
+            line = FiftyAsSo.Replace(line, "So");
+            return SoMisread.Replace(line, m => Regex.IsMatch(line.Substring(0, m.Index), @"[a-z,]\s*$") ? "so" : "So");
         }
 
         private static bool IsBracketToKeep(char c, bool unclosedSquare) => c == '[' && !unclosedSquare;

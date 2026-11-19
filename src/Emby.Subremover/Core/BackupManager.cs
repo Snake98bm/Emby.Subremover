@@ -78,6 +78,40 @@ namespace Emby.Subremover.Core
             };
         }
 
+        /// <summary>Deletes <paramref name="original"/>, backing it up first (restoring the backup brings it back).</summary>
+        public static ReplaceResult Remove(string original, BackupMode mode, string backupFolder)
+        {
+            var backup = BackupPaths.For(original, mode, backupFolder);
+            var newBackup = backup != null && !File.Exists(backup);
+            try
+            {
+                if (mode == BackupMode.NextToOriginal && newBackup)
+                {
+                    File.Move(original, backup);
+                }
+                else
+                {
+                    if (mode == BackupMode.BackupFolder && newBackup)
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(backup));
+                        File.Copy(original, backup);
+                    }
+                    File.Delete(original);
+                }
+            }
+            catch (Exception ex)
+            {
+                if (mode == BackupMode.BackupFolder && newBackup && File.Exists(original)) TryDelete(backup);
+                return new ReplaceResult { Message = "could not back it up and delete it, it was left as it was: " + ex.Message };
+            }
+            return new ReplaceResult
+            {
+                Success = true,
+                BackupPath = backup,
+                NewBackup = newBackup ? new BackupEntry { OriginalPath = original, BackupPath = backup, CreatedUtc = DateTime.UtcNow } : null
+            };
+        }
+
         public static void Restore(BackupEntry entry)
         {
             var original = entry.OriginalPath;

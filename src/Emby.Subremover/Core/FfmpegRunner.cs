@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -41,6 +42,41 @@ namespace Emby.Subremover.Core
             Run(_ffmpegPath(), args, ct, workingDirectory);
 
         public Task<ProcessResult> RunFfprobe(IList<string> args, CancellationToken ct) => Run(_ffprobePath(), args, ct, null);
+
+        /// <summary>
+        /// Runs ffmpeg with its output going to stdout as raw bytes (e.g. "-f s16le pipe:1"), which <paramref name="read"/>
+        /// reads to the end. The exit code and error text come back as usual; StdOut stays empty.
+        /// </summary>
+        public async Task<(ProcessResult Result, T Value)> RunFfmpegBinary<T>(IList<string> args, Func<Stream, T> read, CancellationToken ct)
+        {
+            var psi = new ProcessStartInfo(_ffmpegPath(), FfmpegArgs.ToCommandLine(args))
+            {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                RedirectStandardInput = false,
+                StandardErrorEncoding = new UTF8Encoding(false)
+            };
+            foreach (var variable in _environment()) psi.EnvironmentVariables[variable.Key] = variable.Value;
+
+            var stderr = new StringBuilder();
+            using (var proc = new Process { StartInfo = psi })
+            {
+                proc.ErrorDataReceived += (s, e) => { if (e.Data != null && stderr.Length < 16000) stderr.AppendLine(e.Data); };
+                proc.Start();
+                try { proc.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception) { }
+                proc.BeginErrorReadLine();
+                T value;
+                using (ct.Register(() => { try { if (!proc.HasExited) proc.Kill(); } catch { } }))
+                {
+                    value = await Task.Run(() => read(proc.StandardOutput.BaseStream), ct).ConfigureAwait(false);
+                    proc.WaitForExit();
+                }
+                ct.ThrowIfCancellationRequested();
+                return (new ProcessResult { ExitCode = proc.ExitCode, StdOut = string.Empty, StdErr = stderr.ToString().Trim() }, value);
+            }
+        }
 
         private async Task<ProcessResult> Run(string exe, IList<string> args, CancellationToken ct, string workingDirectory)
         {

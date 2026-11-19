@@ -53,6 +53,11 @@ namespace Emby.Subremover.Core
             @"our|us|my|me|your|you|its|it|this|that|these|those|some|one|any|all|each|every|no|hand|far|accident|mistake)\b",
             RegexOptions.CultureInvariant, RegexTimeout); // lowercase only: "by The Subs Team" and "by A.B. Someone" are names
 
+        // An e-mail address (name@site.com) or an international phone number (+ and 10 or more digits, spaces and dashes allowed).
+        internal static readonly Regex ContactDetails = new Regex(
+            @"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}\b|(?<![\w+])\+\d(?:[\s-]?\d){9,}",
+            Options, RegexTimeout);
+
         private static bool IsWeakCredit(string start)
         {
             if (start.Length == 0 || !char.IsUpper(start[0])) return false;
@@ -184,6 +189,9 @@ namespace Emby.Subremover.Core
                 if (_captionCredits && CaptionCredit.IsMatch(start)) return "captioning credit";
                 // A caption credit is never taken for a release credit: it only goes with its own switch.
                 if (_credits && !CaptionCredit.IsMatch(start) && (Credit.IsMatch(start) || IsWeakCredit(start))) return "credit";
+                // An uploader's contact line: "© P@rM!NdeR ™ Mobile - +919815899536 EMail - name@hotmail.com". Dialogue
+                // doesn't read out a whole e-mail address or a 10-digit international number.
+                if (_credits && ContactDetails.IsMatch(line)) return "contact details";
             }
             catch (RegexMatchTimeoutException)
             {

@@ -42,6 +42,15 @@ namespace Emby.Subremover
         [Description("Nothing is changed; the log shows what would happen.")]
         public bool DryRun { get; set; } = true;
 
+        [DisplayName("...but still download hash-matched subtitles and clean up subtitle files")]
+        [Description("Videos stay unchanged, but runs and scheduled tasks download perfect hash matches, take ads out of .srt files and fix their timing (when those are on). Changed files are backed up first.")]
+        [VisibleCondition(nameof(DryRun), SimpleCondition.IsTrue)]
+        public bool SubtitleFilesInTestMode { get; set; }
+
+        /// <summary>Whether runs may download hash-matched subtitles and change .srt files: Test mode off, or on with
+        /// <see cref="SubtitleFilesInTestMode"/>.</summary>
+        internal bool ChangesSubtitleFiles => !DryRun || SubtitleFilesInTestMode;
+
         [DisplayName("Libraries to process")]
         [Description("Only videos in these libraries are checked.")]
         [EditMultilSelect]
@@ -115,7 +124,7 @@ namespace Emby.Subremover
         [VisibleCondition(nameof(ExtractTextSubtitles), SimpleCondition.IsTrue)]
         public bool RemoveExtractedFromVideo { get; set; }
 
-        [DisplayName("Experimental: convert picture subtitles to text (OCR)")]
+        [DisplayName("Convert picture subtitles to text (OCR)")]
         [Description("Turns picture subtitles (PGS/DVD) into text files.")]
         public bool OcrPictureSubtitles { get; set; }
 
@@ -160,12 +169,44 @@ namespace Emby.Subremover
         public string SubtitleAdText { get; set; } = SubtitleAdRules.DefaultList;
 
         [DisplayName("...also remove \"Subtitles by\" and \"Synced by\" credits")]
-        [Description("Lines that start like \"Subtitles by…\", \"Sync and corrections by…\" or \"Ripped by…\".")]
+        [Description("Lines that start like \"Subtitles by…\", \"Sync and corrections by…\" or \"Ripped by…\", and uploaders' contact lines with an e-mail address or a +country phone number.")]
         public bool RemoveSubtitleCredits { get; set; } = true;
 
         [DisplayName("...also remove TV captioning credits")]
         [Description("\"Captioned by Media Access Group at WGBH\", \"Captioning sponsored by…\". Off: they stay.")]
         public bool RemoveCaptionCredits { get; set; }
+
+        [DisplayName("Fix subtitle file timing")]
+        [Description("During runs, checks the .srt files next to the videos against the speech and moves a file that is off by the same amount all the way through. Never stretches: a file that drifts is left alone. Reads each video's audio, so it takes a while. Each changed file is backed up first.")]
+        public bool FixSubtitleTiming { get; set; }
+
+        [DisplayName("...delete an out-of-sync copy when another in the same language is in sync")]
+        [Description("Regular subtitles only: SDH, forced, commentary and audio-description files are never deleted this way. Off: the copy that is off is moved instead.")]
+        public bool DeleteOutOfSyncDuplicates { get; set; } = true;
+
+        [DisplayName("...when none are in sync, keep the best copy and delete the worse ones")]
+        [Description("Of several regular files in one language, the best stays (moved if it's off by one amount); ones that drift or don't match the speech (another cut or frame rate) go. The only file of a language is never deleted.")]
+        public bool DeleteOtherVersionSubtitles { get; set; }
+
+        [DisplayName("...delete subtitle files that are way off")]
+        [Description("English .srt files of videos with English audio that moving can't fix (another cut or frame rate), deleted even when they're the only English file. Backed up first, on the restore list. Recommended: more than 2 s off in most of the file.")]
+        public WayOffSubtitles DeleteWayOffSubtitles { get; set; } = WayOffSubtitles.Off;
+
+        [DisplayName("...skip .srt files extracted from the video's own subtitles")]
+        [Description("A file SubRemover extracted from the video's built-in text subtitle is an exact copy, so it's in sync: it isn't measured, and a video with only such files isn't read at all.")]
+        public bool SkipExtractedTimingCopies { get; set; } = true;
+
+        [DisplayName("Videos per timing run")]
+        [Description("Scan run and Fix timing now measure this many videos, then stop; the next click carries on from there. 0 = all of them.")]
+        [MinValue(0)]
+        [MaxValue(100000)]
+        public int TimingVideosPerRun { get; set; }
+
+        [DisplayName("Videos measured at once")]
+        [Description("How many videos' audio is read side by side when checking timing. More is faster but busier.")]
+        [MinValue(1)]
+        [MaxValue(8)]
+        public int TimingVideosAtOnce { get; set; } = 4;
 
         [DisplayName("Backup of the original file")]
         [Description("Where the original goes before a video is changed.")]
@@ -183,7 +224,7 @@ namespace Emby.Subremover
         public int BackupRetentionDays { get; set; }
 
         [DisplayName("Delete subtitle file backups older than (days)")]
-        [Description("Backups of .srt files that had ads taken out. They're tiny. 0 keeps them forever.")]
+        [Description("Backups of .srt files SubRemover changed or deleted (ads taken out, timing fixed). They're tiny. 0 keeps them forever.")]
         [MinValue(0)]
         [MaxValue(36500)]
         public int SubtitleBackupRetentionDays { get; set; }

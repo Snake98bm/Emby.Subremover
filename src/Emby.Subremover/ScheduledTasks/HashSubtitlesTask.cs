@@ -33,6 +33,7 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly ISubtitleManager _subtitles;
         private readonly FfmpegRunner _runner;
         private readonly IJsonSerializer _json;
+        private readonly TaskProgressStore _progress;
 
         public HashSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
             IJsonSerializer json, IApplicationPaths appPaths, ISubtitleManager subtitleManager)
@@ -45,6 +46,8 @@ namespace Emby.Subremover.ScheduledTasks
             _subtitles = subtitleManager;
             _runner = FfmpegRunner.FromEmby(ffmpegManager);
             _json = json;
+            _progress = new TaskProgressStore(appPaths.PluginConfigurationsPath, json);
+            LastResults.UseFolder(appPaths.PluginConfigurationsPath);
         }
 
         public string Name => "Download hash-matched subtitles";
@@ -56,14 +59,22 @@ namespace Emby.Subremover.ScheduledTasks
 
         public IEnumerable<TaskTriggerInfo> GetDefaultTriggers() => Array.Empty<TaskTriggerInfo>();
 
-        /// <summary>What the last run found, for the settings page (until Emby restarts).</summary>
-        internal static string LastResult { get; private set; }
+        /// <summary>When the last run finished and what it found, for the settings page; kept across restarts.</summary>
+        internal static string LastResult
+        {
+            get => _lastResult ?? LastResults.Load("hash");
+            private set { _lastResult = value; LastResults.Save("hash", value); }
+        }
+
+        private static string _lastResult;
 
         public async Task Execute(CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
-            // The page's two buttons say which; a scheduled run follows Test mode.
-            var countOnly = Plugin.Instance.TakeHashRunMode() ?? options.DryRun;
+            // The page's two buttons say which; a scheduled run follows Test mode (and its subtitle-files exception).
+            var countOnly = Plugin.Instance.TakeHashRunMode() ?? !options.ChangesSubtitleFiles;
+            // "Start over" throws away where a stopped run got to; otherwise (a button or the schedule) it carries on.
+            if (Plugin.Instance.TakeHashStartOver()) _progress.Delete(ProgressName(countOnly));
             using (var log = new RunLog(_logDirectory, "subremover", _embyLog))
             {
                 var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
@@ -103,6 +114,37 @@ namespace Emby.Subremover.ScheduledTasks
             string stoppedAt = null;
             var limitReached = false;
 
+            // Carry on where a stopped run with the same settings got to.
+            var task = ProgressName(countOnly);
+            var key = ProgressKey(options);
+            var saved = _progress.LoadFor(task, key);
+            var skip = new HashSet<string>(saved?.Done ?? new List<string>(), StringComparer.OrdinalIgnoreCase);
+            if (saved != null)
+            {
+                log.Info($"SubRemover: carrying on the {(countOnly ? "count" : "download")} started {saved.StartedUtc.ToLocalTime():d MMM HH:mm} " +
+                         $"({saved.Describe()}); its totals so far are included. Start over on the settings page to begin again.");
+                checkedBefore = saved.Count("checkedBefore"); changedAlready = saved.Count("changedAlready"); builtIn = saved.Count("builtIn");
+                haveFiles = saved.Count("haveFiles"); searched = saved.Count("searched"); matched = saved.Count("matched");
+                files = saved.Count("files"); failed = saved.Count("failed");
+            }
+            else saved = new TaskProgress { Key = key, StartedUtc = DateTime.UtcNow, LogFile = (log as RunLog)?.FileName };
+            saved.Total = videos.Count;
+            var lastSaved = DateTime.UtcNow;
+            void SaveProgress()
+            {
+                lock (saved)
+                {
+                    saved.Counts = new Dictionary<string, int>
+                    {
+                        ["checkedBefore"] = checkedBefore, ["changedAlready"] = changedAlready, ["builtIn"] = builtIn, ["haveFiles"] = haveFiles,
+                        ["searched"] = searched, ["matched"] = matched, ["files"] = files, ["failed"] = failed
+                    };
+                    _progress.Save(task, saved);
+                }
+                lastSaved = DateTime.UtcNow;
+            }
+            void MarkDone(string path) { lock (saved) saved.Done.Add(path); }
+
             using (var stop = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 var atOnce = Math.Max(1, Math.Min(8, options.VideosAtOnce));
@@ -111,15 +153,17 @@ namespace Emby.Subremover.ScheduledTasks
                 {
                     if (stop.IsCancellationRequested) break;
                     progress.Report(100.0 * position++ / Math.Max(1, videos.Count));
-                    if (!countOnly && done.ContainsKey(video.Path)) { checkedBefore++; continue; }
-                    if (backedUp.Contains(video.Path) || System.IO.File.Exists(video.Path + ".audioremover.bak")) { changedAlready++; continue; }
+                    if (DateTime.UtcNow - lastSaved > TimeSpan.FromSeconds(30)) SaveProgress();
+                    if (skip.Contains(video.Path)) continue;
+                    if (!countOnly && done.ContainsKey(video.Path)) { checkedBefore++; MarkDone(video.Path); continue; }
+                    if (backedUp.Contains(video.Path) || System.IO.File.Exists(video.Path + ".audioremover.bak")) { changedAlready++; MarkDone(video.Path); continue; }
 
                     running.Add(Task.Run(async () =>
                     {
                         try
                         {
                             var probe = await Probe(video.Path, log, stop.Token).ConfigureAwait(false);
-                            if (probe == null) { Interlocked.Increment(ref failed); return; }
+                            if (probe == null) { Interlocked.Increment(ref failed); MarkDone(video.Path); return; }
                             var text = probe.streams.Where(s => s.IsSubtitle && SubtitlePlanner.IsTextCodec(s.codec_name)).Select(s => s.Language).ToList();
                             var languages = HashMatchedSubtitles.LanguagesToSearch(keep, text, ExistingSubtitles.Find(video.Path, new string[0]).Keys);
                             if (HashMatchedSubtitles.LanguagesToSearch(keep, text, new string[0]).Count == 0) Interlocked.Increment(ref builtIn);
@@ -136,6 +180,7 @@ namespace Emby.Subremover.ScheduledTasks
                             }
                             if (result.Found.Count > 0) Interlocked.Increment(ref matched);
                             Interlocked.Add(ref files, result.Downloaded.Count);
+                            MarkDone(video.Path);
                         }
                         catch (OperationCanceledException)
                         {
@@ -144,6 +189,7 @@ namespace Emby.Subremover.ScheduledTasks
                         {
                             Interlocked.Increment(ref failed);
                             log.ErrorException("SubRemover: unexpected error on {0}", ex, video.Path);
+                            MarkDone(video.Path);
                         }
                     }));
 
@@ -155,6 +201,9 @@ namespace Emby.Subremover.ScheduledTasks
                 }
                 await Task.WhenAll(running).ConfigureAwait(false);
             }
+            // Stopped (by hand, the daily limit or a failed search): keep where it got to for the next run.
+            if (ct.IsCancellationRequested || stoppedAt != null || limitReached) SaveProgress();
+            else _progress.Delete(task);
             ct.ThrowIfCancellationRequested();
             progress.Report(100);
 
@@ -186,6 +235,19 @@ namespace Emby.Subremover.ScheduledTasks
                 log.ErrorException("SubRemover: could not read ffprobe output for {0}", ex, path);
                 return null;
             }
+        }
+
+        internal static string ProgressName(bool countOnly) => countOnly ? "hash-count" : "hash-download";
+
+        // A stopped run only carries on with the same libraries, path filter and languages.
+        internal static string ProgressKey(PluginOptions options) =>
+            string.Join("|", options.Libraries, options.OnlyPathContains, options.KeepLanguages);
+
+        /// <summary>Where a stopped Count or Download got to, for the settings page; null when there's nothing to carry on.</summary>
+        internal static TaskProgress Stopped(TaskProgressStore store, PluginOptions options, bool countOnly)
+        {
+            var saved = store.Load(ProgressName(countOnly));
+            return saved != null && saved.Key == ProgressKey(options) ? saved : null;
         }
     }
 }

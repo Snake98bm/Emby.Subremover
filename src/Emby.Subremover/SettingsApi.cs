@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using Emby.Subremover.Core;
 using Emby.Web.GenericEdit.Elements;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.MediaEncoding;
@@ -49,6 +50,9 @@ namespace Emby.Subremover
     public class StartHashSubtitles : IReturn<StatusDto>
     {
         public bool CountOnly { get; set; }
+
+        /// <summary>Forget where a stopped run got to, rather than carry on from there.</summary>
+        public bool StartOver { get; set; }
     }
 
     [Route("/SubRemover/HashSubtitles/Status", "GET", Summary = "The hash-matched subtitles status line", IsHidden = true)]
@@ -70,12 +74,31 @@ namespace Emby.Subremover
     {
     }
 
+    [Route("/SubRemover/SubtitleTiming", "POST", Summary = "Scans or fixes the timing of subtitle files", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class StartSubtitleTiming : IReturn<TimingStatusDto>
+    {
+        public bool TestOnly { get; set; }
+
+        /// <summary>Forget where a stopped run got to and measure every file again.</summary>
+        public bool StartOver { get; set; }
+    }
+
+    [Route("/SubRemover/SubtitleTiming/Status", "GET", Summary = "The subtitle-timing status line", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class GetSubtitleTimingStatus : IReturn<TimingStatusDto>
+    {
+    }
+
     [Route("/SubRemover/Backups", "GET", Summary = "Videos with a backup, for the restore list", IsHidden = true)]
     [Authenticated(Roles = "Admin")]
     public class GetBackups : IReturn<BackupListDto>
     {
         /// <summary>"all" (default), "videos" or "subtitles".</summary>
         public string Show { get; set; }
+
+        /// <summary>Why the backup was made (a BackupReasons value), or "any" (default).</summary>
+        public string Why { get; set; }
     }
 
     [Route("/SubRemover/Restore", "POST", Summary = "Restores the selected videos from their backups", IsHidden = true)]
@@ -90,6 +113,23 @@ namespace Emby.Subremover
 
         /// <summary>The "Show" the list was made with, as passed to GetBackups.</summary>
         public string Show { get; set; }
+
+        /// <summary>The "Why" the list was made with, as passed to GetBackups.</summary>
+        public string Why { get; set; }
+    }
+
+    [Route("/SubRemover/DeleteBackups", "POST", Summary = "Deletes the selected backups for good", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class DeleteBackups : IReturn<StatusDto>
+    {
+        /// <summary>The list the selection was made on, as GetBackups returned it.</summary>
+        public string Key { get; set; }
+        public string Indexes { get; set; }
+        public string Show { get; set; }
+        public string Why { get; set; }
+
+        /// <summary>What was typed to confirm: must be "delete" (any capitals).</summary>
+        public string Confirm { get; set; }
     }
 
     [Route("/SubRemover/LogView", "GET", Summary = "One run log, for the Logs tab", IsHidden = true)]
@@ -97,6 +137,12 @@ namespace Emby.Subremover
     public class GetLogView : IReturn<LogViewDto>
     {
         public string Name { get; set; }
+
+        /// <summary>"all" (default), "problems", or what it's about: Videos, SubtitleFiles, HashDownloads, Ocr.</summary>
+        public string Show { get; set; }
+
+        /// <summary>Leave out Debug lines.</summary>
+        public bool HideDetails { get; set; }
     }
 
     public class PageDto
@@ -110,6 +156,7 @@ namespace Emby.Subremover
         public StatusDto Status { get; set; }
         public StatusDto HashStatus { get; set; }
         public AdStatusDto AdStatus { get; set; }
+        public TimingStatusDto TimingStatus { get; set; }
         public string BackupCount { get; set; }
         public List<string> Logs { get; set; }
     }
@@ -160,6 +207,21 @@ namespace Emby.Subremover
         };
     }
 
+    public class TimingStatusDto
+    {
+        public StatusDto Status { get; set; }
+        public string LogName { get; set; }
+        public string LogUrl { get; set; }
+
+        internal static TimingStatusDto Current(Plugin plugin) => new TimingStatusDto
+        {
+            Status = StatusDto.From(plugin.TimingStatus()),
+            LogName = ScheduledTasks.SubtitleTimingTask.LastLogName,
+            LogUrl = ScheduledTasks.SubtitleTimingTask.LastLogName == null ? null
+                : GetSubremoverLog.Link(ScheduledTasks.SubtitleTimingTask.LastLogName, plugin.LogLinkKey.Current(DateTime.UtcNow), download: false)
+        };
+    }
+
     public class AdSuggestionDto
     {
         public string Entry { get; set; }
@@ -174,6 +236,16 @@ namespace Emby.Subremover
         public string Key { get; set; }
         public int Total { get; set; }
         public List<BackupRowDto> Items { get; set; }
+
+        /// <summary>The reasons to filter by, with how many backups of the chosen kind have each.</summary>
+        public List<ReasonDto> Reasons { get; set; }
+    }
+
+    public class ReasonDto
+    {
+        public string Value { get; set; }
+        public string Label { get; set; }
+        public int Count { get; set; }
     }
 
     public class BackupRowDto
@@ -196,6 +268,9 @@ namespace Emby.Subremover
         public string Text { get; set; }
         public string OpenUrl { get; set; }
         public string DownloadUrl { get; set; }
+
+        /// <summary>How many entries each filter choice shows.</summary>
+        public Dictionary<string, int> Counts { get; set; }
     }
 
     public class SettingsApi : IService
@@ -235,6 +310,7 @@ namespace Emby.Subremover
                 Status = StatusDto.From(plugin.CurrentStatus()),
                 HashStatus = StatusDto.From(plugin.HashStatus()),
                 AdStatus = AdStatusDto.Current(plugin),
+                TimingStatus = TimingStatusDto.Current(plugin),
                 BackupCount = plugin.BackupCountText(),
                 Logs = SafeLogList()
             };
@@ -270,7 +346,7 @@ namespace Emby.Subremover
 
         public object Get(GetRunStatus request) => StatusDto.From(Plugin.CurrentStatus());
 
-        public object Post(StartHashSubtitles request) => StatusDto.From(Plugin.StartHashRun(request.CountOnly));
+        public object Post(StartHashSubtitles request) => StatusDto.From(Plugin.StartHashRun(request.CountOnly, request.StartOver));
 
         public object Get(GetHashStatus request) => StatusDto.From(Plugin.HashStatus());
 
@@ -284,14 +360,25 @@ namespace Emby.Subremover
 
         public object Get(GetSubtitleAdsStatus request) => AdStatusDto.Current(Plugin);
 
+        public object Post(StartSubtitleTiming request)
+        {
+            var started = Plugin.StartTimingRun(request.TestOnly, request.StartOver);
+            var dto = TimingStatusDto.Current(Plugin);
+            dto.Status = StatusDto.From(started);
+            return dto;
+        }
+
+        public object Get(GetSubtitleTimingStatus request) => TimingStatusDto.Current(Plugin);
+
         public object Get(GetBackups request)
         {
-            var (refusal, backups) = Plugin.RestorePlan(request.Show);
+            var (refusal, backups, ofKind) = Plugin.RestorePlan(request.Show, request.Why);
             return new BackupListDto
             {
                 Refusal = refusal,
                 Key = RestoreKey(backups),
                 Total = backups.Count,
+                Reasons = BackupReasons.Counts(ofKind).Select(r => new ReasonDto { Value = r.Value, Label = r.Label, Count = r.Count }).ToList(),
                 Items = backups.Take(Plugin.RestoreListLimit).Select(b => new BackupRowDto
                 {
                     File = Path.GetFileName(b.OriginalPath),
@@ -309,7 +396,7 @@ namespace Emby.Subremover
         public object Post(StartRestore request)
         {
             var plugin = Plugin;
-            var (refusal, backups) = plugin.RestorePlan(request.Show);
+            var (refusal, backups, _) = plugin.RestorePlan(request.Show, request.Why);
             if (refusal != null) return Warning(refusal);
             if (string.IsNullOrEmpty(request.Key) || request.Key != RestoreKey(backups))
                 return Warning("Nothing restored: the list of backups changed. Click 'Restore originals from backups…' to see it again.");
@@ -317,6 +404,20 @@ namespace Emby.Subremover
             var chosen = Plugin.SelectedBackups(backups, ParseIndexes(request.Indexes));
             if (chosen.Count == 0) return Warning("Nothing restored: no video was selected.");
             return StatusDto.From(plugin.StartRestore(chosen));
+        }
+
+        // Deletes only from the list the person looked at, and only after they typed the word.
+        public object Post(DeleteBackups request)
+        {
+            if (!Plugin.IsDeleteConfirmed(request.Confirm)) return Warning("Nothing deleted: type Delete to confirm.");
+            var plugin = Plugin;
+            var (refusal, backups, _) = plugin.RestorePlan(request.Show, request.Why);
+            if (refusal != null) return Warning(refusal.Replace("Nothing restored", "Nothing deleted"));
+            if (string.IsNullOrEmpty(request.Key) || request.Key != RestoreKey(backups))
+                return Warning("Nothing deleted: the list of backups changed. Click 'Restore originals from backups…' to see it again.");
+            var chosen = Plugin.SelectedBackups(backups, ParseIndexes(request.Indexes));
+            if (chosen.Count == 0) return Warning("Nothing deleted: no backup was selected.");
+            return StatusDto.From(plugin.DeleteBackups(chosen));
         }
 
         public object Get(GetLogView request)
@@ -327,12 +428,19 @@ namespace Emby.Subremover
 
             var key = Plugin.LogLinkKey.Current(DateTime.UtcNow);
             string text;
-            try { text = RunLog.ReadForDisplay(_logDirectory, name); }
+            Dictionary<string, int> counts = null;
+            try
+            {
+                var filtered = LogFilter.Apply(RunLog.ReadAll(_logDirectory, name), request.Show, request.HideDetails);
+                text = RunLog.CutForDisplay(filtered.Text);
+                counts = filtered.Counts;
+            }
             catch (Exception ex) { text = "Couldn't read the run log: " + ex.Message; }
             return new LogViewDto
             {
                 Name = name,
                 Text = text,
+                Counts = counts,
                 OpenUrl = GetSubremoverLog.Link(name, key, download: false),
                 DownloadUrl = GetSubremoverLog.Link(name, key, download: true)
             };
