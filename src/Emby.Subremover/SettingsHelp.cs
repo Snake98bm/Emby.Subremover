@@ -54,7 +54,8 @@ namespace Emby.Subremover
                 "SubRemover starts runs at below-normal priority, so playback comes first. Use 1 to check one video at a time."),
             (SettingsTabId.Run, "Show in the server sidebar menu",
                 "Lists SubRemover under Advanced in the server sidebar. It's always under Plugins too. After changing it, click Save " +
-                "and force-refresh the page with Ctrl+F5 (Cmd+Shift+R on a Mac): a normal reload keeps the old menu."),
+                "and then hold Ctrl and press F5 (on a Mac: Cmd+Shift+R). That reloads the Emby page fully; a plain F5 can " +
+                "still show the old menu."),
             (SettingsTabId.Run, "Re-check every video on next run",
                 "Forgets which videos were already done, including ones you restored, so the next real run checks all of them again; it " +
                 "then switches itself off. In test mode it only includes them and forgets nothing."),
