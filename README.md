@@ -19,7 +19,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
 - Optional: fix the timing of `.srt` files next to the videos. Each file is measured against the video's speech; one that's off by the same amount all the way through is moved, worse copies of a language can be deleted, and English files that are way off (more than 2 or 5 s at the start, middle or end) can be deleted even when they're the only one. Audio with no language tag can count as English for this. Every change is backed up first.
 - Optional: remove commentary tracks, remove SDH/CC/hearing-impaired tracks (only when a regular track in the same language stays), keep forced tracks in any language, keep tracks with no language set.
 - Optional: process new videos as Emby adds them. A few minutes after the last one arrives, one run checks just the new videos with your settings (Test mode included), so a whole season gets one run and one log.
-- Its own settings page with tabs (**Run**, **Subtitles**, **Subtitle files**, **Backups**, **Logs**), each explaining its settings at the bottom: **Run now**, run status, a restore list and a log viewer (open a log in a new window or download it), plus an entry in the server sidebar under **Advanced** (can be turned off).
+- Its own settings page with tabs (**Run**, **Subtitles**, **Subtitle files**, **Backups**, **Logs**), each explaining its settings at the bottom: **Run now**, run status, a restore list and a log viewer (open a log in a new window or download it), plus an entry in the server sidebar's **Server** section (can be turned off).
 
 ## Install
 
@@ -40,7 +40,7 @@ It was inspired by the old *SubKiller* plugin, which no longer works on current 
    docker cp Emby.Subremover.dll emby:/config/plugins/
    ```
 3. Start Emby (Docker: `docker start emby`) and press **Ctrl+F5** in your browser so the menus reload.
-4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** under **Advanced** in the server sidebar). On the **Run** tab pick your libraries and leave **Test mode** on; on the **Subtitles** tab pick your languages, or click **Quick setup: English + no language**. Click **Save**.
+4. Go to **Settings → Plugins → SubRemover** (or **SubRemover** in the **Server** section of the sidebar). On the **Run** tab pick your libraries and leave **Test mode** on; on the **Subtitles** tab pick your languages, or click **Quick setup: English + no language**. Click **Save**.
 5. Click **Run now**. The status on the **Run** tab shows progress, and its log appears on the **Logs** tab.
 6. When the log looks right, turn Test mode off, set **Max videos to change per run** to a few, and run it again. Check those files in Emby before letting it do the rest.
 

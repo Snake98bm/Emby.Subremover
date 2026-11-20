@@ -264,8 +264,8 @@ namespace Emby.Subremover
         [VisibleCondition(nameof(ResumeInterruptedRuns), SimpleCondition.IsTrue)]
         public bool ResumeAfterRestart { get; set; } = true;
 
-        [DisplayName("Show in the server sidebar menu")]
-        [Description("Also lists SubRemover in the server sidebar.")]
+        [DisplayName("Show in the server sidebar menu (to see the change: click Save, then hold Ctrl and press F5)")]
+        [Description("Also lists SubRemover in the server sidebar. Ctrl+F5 reloads the Emby page fully; a plain F5 can still show the old menu.")]
         public bool ShowInSidebar { get; set; } = true;
 
         [DisplayName("Re-check every video on next run")]
