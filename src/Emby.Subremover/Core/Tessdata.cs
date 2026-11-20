@@ -70,9 +70,12 @@ namespace Emby.Subremover.Core
                 File.Move(temp, file);
                 return null;
             }
-            catch (Exception ex) when (!(ex is OperationCanceledException))
+            // A timeout surfaces as a TaskCanceledException too: only a stop the user asked for may stop the run.
+            catch (Exception ex) when (!(ex is OperationCanceledException) || !ct.IsCancellationRequested)
             {
-                return $"download of {Folder(best)}/{language}.traineddata failed: {ex.Message}";
+                try { File.Delete(file + ".download"); } catch (Exception) { }
+                var why = ex is OperationCanceledException ? "timed out" : ex.Message;
+                return $"download of {Folder(best)}/{language}.traineddata failed: {why}";
             }
             finally
             {

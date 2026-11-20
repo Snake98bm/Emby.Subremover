@@ -26,8 +26,22 @@ namespace Emby.Subremover
             Directory.CreateDirectory(logDirectory);
             DeleteOldFiles(logDirectory, prefix, KeepFiles - 1);
 
-            FilePath = Path.Combine(logDirectory, $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
-            _writer = new StreamWriter(new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite), new UTF8Encoding(false))
+            // Each task its own file: two tasks started in the same second would otherwise write over each other's lines.
+            var stamp = $"{prefix}-{DateTime.Now:yyyyMMdd-HHmmss}";
+            FileStream stream = null;
+            for (var n = 1; stream == null; n++)
+            {
+                var path = Path.Combine(logDirectory, n == 1 ? stamp + ".txt" : $"{stamp}-{n}.txt");
+                try
+                {
+                    stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
+                    FilePath = path;
+                }
+                catch (IOException) when (n < 50 && File.Exists(path))
+                {
+                }
+            }
+            _writer = new StreamWriter(stream, new UTF8Encoding(false))
             {
                 AutoFlush = true
             };

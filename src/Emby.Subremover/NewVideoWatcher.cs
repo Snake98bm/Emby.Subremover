@@ -34,6 +34,20 @@ namespace Emby.Subremover
         private readonly CheckpointStore _checkpoints;
         private Timer _resumeTimer;
 
+        private static NewVideoWatcher _current;
+
+        /// <summary>
+        /// A run for new videos was refused (another SubRemover task held the gate): they wait here again and get their
+        /// own run once it's free. Without a watcher (not started yet) they're dropped; the next full run checks them.
+        /// </summary>
+        internal static void Requeue(System.Collections.Generic.IEnumerable<string> videos)
+        {
+            var watcher = _current;
+            if (watcher == null) return;
+            foreach (var v in videos) watcher._waiting.Add(v);
+            watcher.StartTimer(WaitWhileBusy);
+        }
+
         public NewVideoWatcher(ILibraryManager libraryManager, ITaskManager taskManager, ILogManager logManager,
             MediaBrowser.Common.Configuration.IApplicationPaths appPaths, MediaBrowser.Model.Serialization.IJsonSerializer json)
         {
@@ -72,6 +86,7 @@ namespace Emby.Subremover
 
         public void Run()
         {
+            _current = this;
             _libraryManager.ItemAdded += OnItemAdded;
             ResumeInterruptedRun();
         }
@@ -79,6 +94,7 @@ namespace Emby.Subremover
         public void Dispose()
         {
             _libraryManager.ItemAdded -= OnItemAdded;
+            if (_current == this) _current = null;
             lock (_timerLock) _timer?.Dispose();
             _resumeTimer?.Dispose();
         }
@@ -107,7 +123,9 @@ namespace Emby.Subremover
             try
             {
                 var busy = _taskManager.ScheduledTasks
-                    .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask) && w.State != TaskState.Idle);
+                    .Any(w => (w.ScheduledTask is RemoveSubtitlesTask || w.ScheduledTask is RestoreBackupsTask) && w.State != TaskState.Idle)
+                    // Also the ads and timing tasks and deleting backups: they hold the gate, and a run would be refused.
+                    || TaskGate.IsBusy;
                 if (busy)
                 {
                     StartTimer(WaitWhileBusy);

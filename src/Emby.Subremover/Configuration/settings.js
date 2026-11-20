@@ -51,6 +51,8 @@ define([], function () {
         var loaded = false;
         var dirty = false;
         var pollTimer = null;
+        // Set while the page is hidden: no status polling then, and a reply still on its way doesn't start it again.
+        var hidden = false;
         var backupList = null;  // what GET SubRemover/Backups returned, while the restore list is open
 
         function el(id) { return view.querySelector('#' + id); }
@@ -285,7 +287,7 @@ define([], function () {
         var hashTimer;
         function pollHash(status) {
             clearTimeout(hashTimer);
-            if (!status || status.State !== 'InProgress') return;
+            if (hidden || !status || status.State !== 'InProgress') return;
             hashTimer = setTimeout(function () {
                 getJson('SubRemover/HashSubtitles/Status').then(function (s) {
                     var box = el('srHashStatus');
@@ -370,6 +372,7 @@ define([], function () {
         var adTimer;
         function pollAds(status) {
             clearTimeout(adTimer);
+            if (hidden) return;
             if (!status || status.State !== 'InProgress') return;
             adTimer = setTimeout(function () {
                 getJson('SubRemover/SubtitleAds/Status').then(function (r) {
@@ -425,6 +428,7 @@ define([], function () {
         var timingTimer;
         function pollTiming(status) {
             clearTimeout(timingTimer);
+            if (hidden) return;
             if (!status || status.State !== 'InProgress') return;
             timingTimer = setTimeout(function () {
                 getJson('SubRemover/SubtitleTiming/Status').then(function (r) {
@@ -761,7 +765,7 @@ define([], function () {
         // While a run is going, the status line follows it.
         function pollIfRunning(status) {
             clearTimeout(pollTimer);
-            if (!status || status.State !== 'InProgress') return;
+            if (hidden || !status || status.State !== 'InProgress') return;
             pollTimer = setTimeout(function () {
                 getJson('SubRemover/Status').then(function (s) {
                     var box = el('srRunStatus');
@@ -775,7 +779,13 @@ define([], function () {
         el('srSaveTop').addEventListener('click', function () { save(); });
         el('srRunTop').addEventListener('click', function () { showTab('Run'); runNow(); });
 
-        view.addEventListener('viewshow', function () { load(); });
-        view.addEventListener('viewhide', function () { clearTimeout(pollTimer); });
+        view.addEventListener('viewshow', function () { hidden = false; load(); });
+        view.addEventListener('viewhide', function () {
+            hidden = true;
+            clearTimeout(pollTimer);
+            clearTimeout(hashTimer);
+            clearTimeout(adTimer);
+            clearTimeout(timingTimer);
+        });
     };
 });

@@ -159,7 +159,10 @@ namespace Emby.Subremover.Core
             if (planned?.Files == null) return null;
             if (planned.VideoStamp == null || !planned.VideoStamp.Matches(stampOf(videoPath))) return null;
             if (planned.Files.Count != paths.Count) return null;
-            var byPath = planned.Files.Where(f => f?.Path != null).ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
+            // Names differing only in case ("Movie.en.srt" and "Movie.EN.srt", on Linux) can't be told apart here: measure again.
+            var named = planned.Files.Where(f => f?.Path != null).ToList();
+            if (named.Select(f => f.Path).Distinct(StringComparer.OrdinalIgnoreCase).Count() != named.Count) return null;
+            var byPath = named.ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
             foreach (var path in paths)
             {
                 if (!byPath.TryGetValue(path, out var file) || file.Stamp == null || !file.Stamp.Matches(stampOf(path))) return null;

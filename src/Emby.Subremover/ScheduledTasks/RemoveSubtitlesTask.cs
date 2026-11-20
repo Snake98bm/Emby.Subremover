@@ -66,9 +66,10 @@ namespace Emby.Subremover.ScheduledTasks
             {
                 if (!TaskGate.TryEnter())
                 {
-                    const string busy = "another SubRemover task (restore, or removing ads from subtitle files) is running - try again when it has finished";
-                    // Hand the new videos back, so the next run still gets to them.
-                    Plugin.Instance.NewVideos.AddRange(newVideos);
+                    const string busy = TaskGate.BusyMessage;
+                    // Hand the new videos back to the watcher, which starts another run for them once the gate is free.
+                    // Not left in Plugin.NewVideos: the next scheduled full run would take them and check only those.
+                    if (newVideos != null) NewVideoWatcher.Requeue(newVideos);
                     runLog.Summary("SubRemover: {0}", busy);
                     var state = _store.Load();
                     state.LastRun = new RunSummary { FinishedUtc = DateTime.UtcNow, Problem = busy, LogFile = runLog.FileName };
@@ -92,6 +93,8 @@ namespace Emby.Subremover.ScheduledTasks
         private async Task Run(RunLog runLog, ISet<string> newVideos, CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
+            // Read once: a real run switches the setting off below, but this run still starts over.
+            var recheckAll = options.ReprocessAll;
             var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             runLog.Summary("SubRemover {0} starting{1}{2}. Details: {3}", version,
@@ -118,7 +121,7 @@ namespace Emby.Subremover.ScheduledTasks
                 _store.Save(state);
             }
 
-            if (options.ReprocessAll && !options.DryRun)
+            if (recheckAll && !options.DryRun)
             {
                 _log.Info("SubRemover: 'Re-check every video' is on - clearing the processed and restored lists");
                 state.ForgetEverything();
@@ -135,8 +138,8 @@ namespace Emby.Subremover.ScheduledTasks
             if (!options.DryRun) _store.Save(state);
 
             // Test mode checks the videos a real run would check now, without forgetting anything.
-            var history = options.DryRun ? state.PreviewFor(signature, options.ReprocessAll) : state;
-            if (options.DryRun && options.ReprocessAll) _log.Info("SubRemover: 'Re-check every video' is on - test mode includes videos already done or restored");
+            var history = options.DryRun ? state.PreviewFor(signature, recheckAll) : state;
+            if (options.DryRun && recheckAll) _log.Info("SubRemover: 'Re-check every video' is on - test mode includes videos already done or restored");
 
             var items = FindVideos(options, newVideos);
             if (newVideos != null)
@@ -158,9 +161,11 @@ namespace Emby.Subremover.ScheduledTasks
             {
                 var key = RunCheckpoint.KeyFor(signature, options.DryRun, options.Libraries, options.OnlyPathContains);
                 checkpoint = _checkpoints.Load();
-                if (checkpoint != null && (checkpoint.Key != key || checkpoint.DryRun != options.DryRun || options.ReprocessAll))
+                if (checkpoint != null && (checkpoint.Key != key || checkpoint.DryRun != options.DryRun || recheckAll))
                 {
-                    _log.Info("SubRemover: an earlier run was interrupted, but the settings have changed since, so this run starts over");
+                    _log.Info(recheckAll
+                        ? "SubRemover: an earlier run was interrupted, but 'Re-check every video' is on, so this run starts over"
+                        : "SubRemover: an earlier run was interrupted, but the settings have changed since, so this run starts over");
                     checkpoint = null;
                 }
                 if (checkpoint != null)
@@ -264,8 +269,9 @@ namespace Emby.Subremover.ScheduledTasks
                     }
                 }
             }
-            // Finished (or stopped at the limit): nothing to continue.
-            _checkpoints.Delete();
+            // Finished (or stopped at the limit): nothing to continue. Only this run's own checkpoint: a run for new videos
+            // never loaded it, so an interrupted full run keeps its place.
+            if (checkpoint != null) _checkpoints.Delete();
 
             if (options.RemoveSubtitleAds) RemoveSubtitleAds(options, state, checkedVideos, cancellationToken);
             if (options.FixSubtitleTiming) await FixSubtitleTiming(options, state, checkedVideos, cancellationToken).ConfigureAwait(false);
@@ -393,21 +399,28 @@ namespace Emby.Subremover.ScheduledTasks
             var files = new SubtitleAdFiles(rules, testOnly, options.BackupMode, options.BackupFolder, _log);
             files.Begin(state);
             var looked = 0;
-            foreach (var video in videos)
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                List<string> srts;
-                try { srts = SubtitleAdFiles.FilesFor(video); }
-                catch (Exception ex) { _log.Debug($"SubRemover: couldn't list the subtitle files of {video}: {ex.Message}"); continue; }
-                foreach (var srt in srts.Where(s => files.NeedsCheck(s, state)))
+                foreach (var video in videos)
                 {
-                    looked++;
-                    files.Clean(srt, video, state);
+                    ct.ThrowIfCancellationRequested();
+                    List<string> srts;
+                    try { srts = SubtitleAdFiles.FilesFor(video); }
+                    catch (Exception ex) { _log.Debug($"SubRemover: couldn't list the subtitle files of {video}: {ex.Message}"); continue; }
+                    foreach (var srt in srts.Where(s => files.NeedsCheck(s, state)))
+                    {
+                        looked++;
+                        files.Clean(srt, video, state);
+                    }
                 }
+                if (looked > 0 || files.Failed > 0)
+                    _log.Info("SubRemover: ads in subtitle files" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
             }
-            if (looked > 0 || files.Failed > 0)
-                _log.Info("SubRemover: ads in subtitle files" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
-            if (!testOnly) _store.Save(state);
+            finally
+            {
+                // Also when stopped: the files already changed must be on the restore list.
+                if (!testOnly) _store.Save(state);
+            }
         }
 
         // "Fix subtitle file timing": the .srt files of the videos this run checked, only videos with a file new or changed
@@ -420,25 +433,32 @@ namespace Emby.Subremover.ScheduledTasks
             files.SkipExtracted = options.SkipExtractedTimingCopies;
             files.UntaggedAudioIsEnglish = options.WayOffUntaggedAudioIsEnglish;
             files.Begin(state);
-            foreach (var video in videos)
+            try
             {
-                ct.ThrowIfCancellationRequested();
-                try
+                foreach (var video in videos)
                 {
-                    await files.Check(video, state, true, ct).ConfigureAwait(false);
+                    ct.ThrowIfCancellationRequested();
+                    try
+                    {
+                        await files.Check(video, state, true, ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _log.Error($"SubRemover: couldn't check the subtitle timing of {video}: {ex.Message}");
+                    }
                 }
-                catch (OperationCanceledException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    _log.Error($"SubRemover: couldn't check the subtitle timing of {video}: {ex.Message}");
-                }
+                if (files.FilesChecked > 0 || files.Failed > 0)
+                    _log.Info("SubRemover: subtitle file timing" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
             }
-            if (files.FilesChecked > 0 || files.Failed > 0)
-                _log.Info("SubRemover: subtitle file timing" + (testOnly ? " (test mode)" : "") + ": " + files.Describe());
-            if (!testOnly) _store.Save(state);
+            finally
+            {
+                // Also when stopped: the files already moved or deleted must be on the restore list.
+                if (!testOnly) _store.Save(state);
+            }
         }
 
         private void CleanOldBackups(PluginOptions options, SubremoverState state)
