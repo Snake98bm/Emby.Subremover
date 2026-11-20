@@ -13,5 +13,11 @@ namespace Emby.Subremover.Core
         public static bool TryEnter() => Gate.Wait(0);
 
         public static void Exit() => Gate.Release();
+
+        /// <summary>Whether some SubRemover task holds the gate right now (remove, restore, ads, timing or deleting backups).</summary>
+        public static bool IsBusy => Gate.CurrentCount == 0;
+
+        /// <summary>What a refused task tells the user.</summary>
+        public const string BusyMessage = "another SubRemover task is running - try again when it has finished";
     }
 }

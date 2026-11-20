@@ -69,7 +69,6 @@ namespace Emby.Subremover.ScheduledTasks
             var countOnly = Plugin.Instance.TakeTimingRunMode() ?? !options.ChangesSubtitleFiles;
             // "Start over": forget where a stopped run got to and measure every file again, even ones found good before.
             var startOver = Plugin.Instance.TakeTimingStartOver();
-            if (startOver) _progress.Delete(ProgressName(countOnly));
             using (var log = new RunLog(_logDirectory, "subremover", _embyLog))
             {
                 LastLogName = log.FileName;
@@ -78,7 +77,7 @@ namespace Emby.Subremover.ScheduledTasks
                     countOnly ? "scan run (nothing is changed)" : "fixing", log.FileName);
                 if (!TaskGate.TryEnter())
                 {
-                    LastResult = "Didn't run: another SubRemover task (a run, a restore or the ads task) is going. Try again when it has finished.";
+                    LastResult = "Didn't run: another SubRemover task is going. Try again when it has finished.";
                     log.Summary("SubRemover: {0}", LastResult);
                     return;
                 }
@@ -102,6 +101,8 @@ namespace Emby.Subremover.ScheduledTasks
         private async Task<string> Run(ILogger log, PluginOptions options, bool countOnly, bool startOver, CancellationToken ct, IProgress<double> progress)
         {
             if (string.IsNullOrWhiteSpace(options.Libraries)) return "Didn't run: choose libraries first (Run tab).";
+            // Only now, with the gate held and the run going ahead: a refused run keeps the stopped run's place.
+            if (startOver) _progress.Delete(ProgressName(countOnly));
             var videos = RemoveSubtitlesTask.FindVideos(_libraryManager, options, null, log);
             var state = _store.Load();
             var files = new SubtitleTimingFiles(_runner, countOnly, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles, options.BackupMode, options.BackupFolder, log, options.DeleteWayOffSubtitles);
@@ -132,6 +133,7 @@ namespace Emby.Subremover.ScheduledTasks
                 files.VideosChecked = saved.Count("videos"); files.FilesChecked = saved.Count("files"); files.Shifted = saved.Count("shifted");
                 files.Deleted = saved.Count("deleted"); files.LeftAlone = saved.Count("leftAlone"); files.Failed = saved.Count("failed");
                 files.FromPlan = saved.Count("fromPlan"); files.FilesFromPlan = saved.Count("filesFromPlan"); files.Rescanned = saved.Count("rescanned");
+                files.WayOffDeleted = saved.Count("wayOffDeleted"); files.SkippedCopies = saved.Count("skippedCopies");
             }
             else saved = new TaskProgress { Key = key, StartedUtc = DateTime.UtcNow, LogFile = (log as RunLog)?.FileName };
             saved.Total = videos.Count;
@@ -143,7 +145,8 @@ namespace Emby.Subremover.ScheduledTasks
                     {
                         ["videos"] = files.VideosChecked, ["files"] = files.FilesChecked, ["shifted"] = files.Shifted,
                         ["deleted"] = files.Deleted, ["leftAlone"] = files.LeftAlone, ["failed"] = files.Failed,
-                        ["fromPlan"] = files.FromPlan, ["filesFromPlan"] = files.FilesFromPlan, ["rescanned"] = files.Rescanned
+                        ["fromPlan"] = files.FromPlan, ["filesFromPlan"] = files.FilesFromPlan, ["rescanned"] = files.Rescanned,
+                        ["wayOffDeleted"] = files.WayOffDeleted, ["skippedCopies"] = files.SkippedCopies
                     };
                     _progress.Save(task, saved);
                     if (plan != null) _plans.Save(plan);
@@ -168,14 +171,30 @@ namespace Emby.Subremover.ScheduledTasks
                         progress.Report(100.0 * Interlocked.Increment(ref position) / Math.Max(1, videos.Count));
                         continue;
                     }
-                    await slots.WaitAsync(ct).ConfigureAwait(false);
-                    if (limit > 0 && files.VideosChecked - measuredBefore >= limit)
+                    // Stopped: dispatch nothing more, but let the videos being measured finish (below) before saving.
+                    try { await slots.WaitAsync(ct).ConfigureAwait(false); }
+                    catch (OperationCanceledException) { break; }
+                    running.RemoveAll(t => t.IsCompleted);
+                    if (limit > 0)
+                    {
+                        // Videos still being measured may count towards the limit: wait for them rather than overshoot.
+                        while (files.VideosChecked - measuredBefore < limit && files.VideosChecked - measuredBefore + running.Count >= limit)
+                        {
+                            await Task.WhenAny(running).ConfigureAwait(false);
+                            running.RemoveAll(t => t.IsCompleted);
+                        }
+                        if (files.VideosChecked - measuredBefore >= limit)
+                        {
+                            slots.Release();
+                            limitReached = true;
+                            break;
+                        }
+                    }
+                    if (ct.IsCancellationRequested)
                     {
                         slots.Release();
-                        limitReached = true;
                         break;
                     }
-                    running.RemoveAll(t => t.IsCompleted);
                     running.Add(Task.Run(async () =>
                     {
                         var finished = false;
@@ -210,13 +229,16 @@ namespace Emby.Subremover.ScheduledTasks
                             }
                             slots.Release();
                         }
-                    }, ct));
+                    }));
                 }
+                // Also when stopped: every worker has finished (and released its slot) before anything is saved or disposed.
                 await Task.WhenAll(running).ConfigureAwait(false);
             }
             if (!countOnly) lock (state) _store.Save(state);
-            // A whole scan: forget videos that are gone or no longer in the libraries.
-            if (plan != null && countOnly && !limitReached && !ct.IsCancellationRequested) plan.KeepOnly(videos.Select(v => v.Path));
+            // A whole scan: forget videos that are gone or no longer in the libraries. Not with a path filter: the videos
+            // outside it are still there, and their saved measurements still count.
+            if (plan != null && countOnly && !limitReached && !ct.IsCancellationRequested && string.IsNullOrWhiteSpace(options.OnlyPathContains))
+                plan.KeepOnly(videos.Select(v => v.Path));
             if (plan != null) _plans.Save(plan);
             // Stopped by hand, or at the per-run limit: keep where it got to for the next click.
             if (ct.IsCancellationRequested || limitReached) SaveProgress();
@@ -225,7 +247,7 @@ namespace Emby.Subremover.ScheduledTasks
             progress.Report(100);
             var what = countOnly ? "Scan run" : "Fix";
             if (limitReached)
-                return $"{what} paused {DateTime.Now:d MMM HH:mm} after {limit} videos (Videos per timing run; {saved.Done.Count:N0} of {saved.Total:N0} done so far): " +
+                return $"{what} paused {DateTime.Now:d MMM HH:mm} after measuring {files.VideosChecked - measuredBefore} videos (Videos per timing run is {limit}; {saved.Done.Count:N0} of {saved.Total:N0} done so far): " +
                        $"{files.Describe()}. Click {(countOnly ? "Scan run" : "Fix timing now")} again to carry on.";
             return $"{what} finished {DateTime.Now:d MMM HH:mm}: {files.Describe()}." +
                    (countOnly && plan != null ? " Saved as the plan for Fix timing now, which only measures again what changed since." : "");
@@ -235,7 +257,8 @@ namespace Emby.Subremover.ScheduledTasks
 
         // A stopped run only carries on with the same libraries, path filter and delete settings.
         internal static string ProgressKey(PluginOptions options) =>
-            string.Join("|", options.Libraries, options.OnlyPathContains, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles);
+            string.Join("|", options.Libraries, options.OnlyPathContains, options.DeleteOutOfSyncDuplicates, options.DeleteOtherVersionSubtitles,
+                options.DeleteWayOffSubtitles, options.WayOffUntaggedAudioIsEnglish, options.SkipExtractedTimingCopies);
 
         /// <summary>Where a stopped scan run (true) or fix (false) got to, for the settings page; null when there's nothing to carry on.</summary>
         internal static TaskProgress Stopped(TaskProgressStore store, PluginOptions options, bool countOnly)
