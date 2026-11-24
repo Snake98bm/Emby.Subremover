@@ -86,6 +86,8 @@ namespace Emby.Subremover
                 EmbeddedResourcePath = "Emby.Subremover.Configuration.settings.html",
                 IsMainConfigPage = true,
                 EnableInMainMenu = Options.ShowInSidebar,
+                // The sidebar's top "Server" section (next to Dashboard and Libraries), not on its own under Advanced.
+                MenuSection = "server",
                 MenuIcon = "subtitles_off"
             },
             new PluginPageInfo
