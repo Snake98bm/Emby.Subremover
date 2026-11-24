@@ -70,7 +70,7 @@ namespace Emby.Subremover.ScheduledTasks
                     countOnly ? "finding (nothing is changed)" : "removing", log.FileName);
                 if (!TaskGate.TryEnter())
                 {
-                    LastResult = "Didn't run: another SubRemover task (a run or a restore) is going. Try again when it has finished.";
+                    LastResult = "Didn't run: another SubRemover task is going. Try again when it has finished.";
                     log.Summary("SubRemover: {0}", LastResult);
                     return;
                 }
@@ -106,25 +106,37 @@ namespace Emby.Subremover.ScheduledTasks
             var position = 0;
             var lastSaved = DateTime.UtcNow;
             var atOnce = Math.Max(1, Math.Min(8, options.VideosAtOnce));
-            Parallel.ForEach(videos, new ParallelOptions { MaxDegreeOfParallelism = atOnce, CancellationToken = ct }, video =>
+            // Each .srt file is cleaned once, by one thread: "Movie.mkv" and "Movie.mp4" share their files.
+            var claimed = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            try
             {
-                progress.Report(100.0 * Interlocked.Increment(ref position) / Math.Max(1, videos.Count));
-                List<string> srts;
-                try { srts = SubtitleAdFiles.FilesFor(video.Path); }
-                catch (Exception ex) { log.Debug($"SubRemover: couldn't list the subtitle files of {video.Path}: {ex.Message}"); return; }
-                // The buttons look at every file again; only runs skip the ones checked before.
-                foreach (var srt in srts) files.Clean(srt, video.Path, state);
-
-                if (!countOnly && DateTime.UtcNow - lastSaved > TimeSpan.FromSeconds(30))
+                Parallel.ForEach(videos, new ParallelOptions { MaxDegreeOfParallelism = atOnce, CancellationToken = ct }, video =>
                 {
-                    lock (state)
+                    progress.Report(100.0 * Interlocked.Increment(ref position) / Math.Max(1, videos.Count));
+                    List<string> srts;
+                    try { srts = SubtitleAdFiles.FilesFor(video.Path); }
+                    catch (Exception ex) { log.Debug($"SubRemover: couldn't list the subtitle files of {video.Path}: {ex.Message}"); return; }
+                    // The buttons look at every file again; only runs skip the ones checked before.
+                    foreach (var srt in srts)
                     {
-                        _store.Save(state);
-                        lastSaved = DateTime.UtcNow;
+                        if (claimed.TryAdd(srt, true)) files.Clean(srt, video.Path, state);
                     }
-                }
-            });
-            if (!countOnly) lock (state) _store.Save(state);
+
+                    if (!countOnly && DateTime.UtcNow - lastSaved > TimeSpan.FromSeconds(30))
+                    {
+                        lock (state)
+                        {
+                            _store.Save(state);
+                            lastSaved = DateTime.UtcNow;
+                        }
+                    }
+                });
+            }
+            finally
+            {
+                // Also when stopped: the files already changed must be on the restore list.
+                if (!countOnly) lock (state) _store.Save(state);
+            }
             progress.Report(100);
 
             var suggestions = files.Suggestions.Waiting(rules);

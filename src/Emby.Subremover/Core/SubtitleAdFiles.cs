@@ -41,18 +41,32 @@ namespace Emby.Subremover.Core
         public int Failed;
         public int Skipped;
 
-        /// <summary>The .srt files that belong to a video: "Movie.srt", "Movie.en.srt", "Movie.eng.sdh.default.srt".</summary>
+        /// <summary>
+        /// The .srt files that belong to a video: "Movie.srt", "Movie.en.srt", "Movie.eng.sdh.default.srt". Not the files of
+        /// another video whose name starts the same way ("Movie.Extended.en.srt" belongs to "Movie.Extended.mkv"). Names and
+        /// extensions are matched ignoring case, also on Linux.
+        /// </summary>
         public static List<string> FilesFor(string videoPath)
         {
             var dir = Path.GetDirectoryName(videoPath);
             var name = Path.GetFileNameWithoutExtension(videoPath);
             if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<string>();
-            return Directory.EnumerateFiles(dir, name + "*.srt")
+            var all = Directory.EnumerateFiles(dir).ToList();
+            // Other videos here named "Movie.<something>": their .srt files are theirs, not this video's.
+            var longer = all.Where(f => SubtitleTimingFiles.IsVideoFile(f))
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(stem => stem.Length > name.Length && stem.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            return all
                 .Where(f =>
                 {
+                    if (!string.Equals(Path.GetExtension(f), ".srt", StringComparison.OrdinalIgnoreCase)) return false;
                     var stem = Path.GetFileNameWithoutExtension(f);
-                    return string.Equals(stem, name, StringComparison.OrdinalIgnoreCase)
-                           || stem.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase);
+                    if (!string.Equals(stem, name, StringComparison.OrdinalIgnoreCase)
+                        && !stem.StartsWith(name + ".", StringComparison.OrdinalIgnoreCase)) return false;
+                    return !longer.Any(v => string.Equals(stem, v, StringComparison.OrdinalIgnoreCase)
+                                            || stem.StartsWith(v + ".", StringComparison.OrdinalIgnoreCase));
                 })
                 .ToList();
         }

@@ -261,14 +261,17 @@ namespace Emby.Subremover
             var made = new List<MadeFile>();
             foreach (var job in plan.Extract)
             {
-                var extracted = await Extract(path, job, before.FrameCountsAreCurrent, state.MadeFileSet(), ct).ConfigureAwait(false);
+                bool ours;
+                lock (state) ours = state.MadeFileSet().Contains(job.OutputPath);
+                var extracted = await Extract(path, job, before.FrameCountsAreCurrent, ours, ct).ConfigureAwait(false);
                 if (extracted == ExtractOutcome.Failed) return Outcome.Failed;
                 if (extracted == ExtractOutcome.KeepTrackInVideo && plan.Remove.Remove(job.Stream)) plan.Keep.Add(job.Stream);
-                if (extracted == ExtractOutcome.Done)
-                {
+                if (extracted == ExtractOutcome.Done || extracted == ExtractOutcome.KeptExisting)
                     made.Add(new MadeFile { Path = job.OutputPath });
+                // Only a file SubRemover wrote is an exact copy of the track: one that was already there (downloaded, or
+                // another tool's) may be for another release, so it must still be measured and may be deleted.
+                if (extracted == ExtractOutcome.Done)
                     lock (state) state.MadeFileSet().Add(job.OutputPath);
-                }
             }
 
             // OCR before the remux: the stream indexes in the plan belong to the original file.
@@ -427,11 +430,13 @@ namespace Emby.Subremover
         private enum ExtractOutcome
         {
             Done,
+            /// <summary>A complete file was already there: the track can go, but SubRemover didn't write that file.</summary>
+            KeptExisting,
             Failed,
             KeepTrackInVideo
         }
 
-        private async Task<ExtractOutcome> Extract(string videoPath, ExtractJob job, bool compareCount, ISet<string> madeFiles, CancellationToken ct)
+        private async Task<ExtractOutcome> Extract(string videoPath, ExtractJob job, bool compareCount, bool existingIsOurs, CancellationToken ct)
         {
             var isAss = !job.ConvertToSrt;
             if (File.Exists(job.OutputPath))
@@ -441,7 +446,7 @@ namespace Emby.Subremover
                 if (existingProblem == null)
                 {
                     _log.Info("SubRemover: {0} already exists and looks complete, not overwriting", job.OutputPath);
-                    return ExtractOutcome.Done;
+                    return existingIsOurs ? ExtractOutcome.Done : ExtractOutcome.KeptExisting;
                 }
                 _log.Warn("SubRemover: existing {0} looks incomplete ({1}). Leaving that file alone and keeping {2} in the video.",
                     job.OutputPath, existingProblem, job.Stream.Describe());

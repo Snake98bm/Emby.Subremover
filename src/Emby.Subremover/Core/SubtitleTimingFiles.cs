@@ -272,7 +272,9 @@ namespace Emby.Subremover.Core
             {
                 audioLanguage = planned.AudioLanguage;
                 Interlocked.Increment(ref FromPlan);
-                var byPath = planned.Files.ToDictionary(f => f.Path, StringComparer.OrdinalIgnoreCase);
+                // Usable() only hands back a plan whose paths are distinct; the indexer never throws on a repeat anyway.
+                var byPath = new Dictionary<string, PlannedFile>(StringComparer.OrdinalIgnoreCase);
+                foreach (var f in planned.Files.Where(f => f?.Path != null)) byPath[f.Path] = f;
                 foreach (var (sub, _) in subs)
                 {
                     var saved = byPath[sub.Path];
@@ -321,7 +323,8 @@ namespace Emby.Subremover.Core
                         lines.Add($"{sub.Name}{kind}: {sub.Result.Describe()}" + (_countOnly ? Would(ref Shifted, " - not moved: scan run") : Shift(sub, file, state)));
                         break;
                     case TimingAction.Delete:
-                        if (sub.WayOff) Interlocked.Increment(ref WayOffDeleted);
+                        // Way-off deletions are counted once done (Delete), or here for a scan run.
+                        if (sub.WayOff && _countOnly) Interlocked.Increment(ref WayOffDeleted);
                         var why = sub.WayOff ? "way off, and moving it can't fix that"
                             : sub.KeptInstead + (sub.KeptInSync ? " is in sync" : " is a better copy");
                         lines.Add($"{sub.Name}{kind}: {sub.Result.Describe()}; deleted: {why}" +
@@ -441,7 +444,11 @@ namespace Emby.Subremover.Core
                     else
                         // None in sync: keep the best (moved if it's off by a fixed amount) and the other movable ones;
                         // the ones that drift or don't match the speech go, if asked.
-                        delete = deleteOtherVersions && (verdict == TimingVerdict.Drifts || verdict == TimingVerdict.Unsure) && Rank(other) <= bestRank;
+                        // A file that couldn't be measured at all (confidence 0, e.g. silent audio) is never a reason to
+                        // delete, and an unmeasurable best copy says nothing about the others.
+                        delete = deleteOtherVersions && best.Result.Confidence > 0
+                                 && (verdict == TimingVerdict.Drifts || (verdict == TimingVerdict.Unsure && other.Result.Confidence > 0))
+                                 && Rank(other) <= bestRank;
                     if (!delete) continue;
                     other.Action = TimingAction.Delete;
                     other.KeptInstead = best.Name;
@@ -471,6 +478,9 @@ namespace Emby.Subremover.Core
             ".mkv", ".mp4", ".m4v", ".avi", ".ts", ".m2ts", ".mov", ".wmv", ".mpg", ".mpeg", ".webm", ".flv", ".iso", ".vob", ".divx", ".ogm"
         };
 
+        /// <summary>Whether the file name has a video extension (any case).</summary>
+        public static bool IsVideoFile(string path) => VideoExtensions.Contains(Path.GetExtension(path));
+
         /// <summary>Other video files in the folder with the same name ("Movie.mp4" next to "Movie.mkv"): they share the .srt files.</summary>
         public static List<string> SameNameVideos(string videoPath)
         {
@@ -479,7 +489,8 @@ namespace Emby.Subremover.Core
                 var dir = Path.GetDirectoryName(videoPath);
                 var stem = Path.GetFileNameWithoutExtension(videoPath);
                 if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return new List<string>();
-                return Directory.EnumerateFiles(dir, stem + ".*")
+                // Every file, filtered here: a search pattern is case-sensitive on Linux.
+                return Directory.EnumerateFiles(dir)
                     .Where(f => !string.Equals(f, videoPath, StringComparison.OrdinalIgnoreCase)
                                 && string.Equals(Path.GetFileNameWithoutExtension(f), stem, StringComparison.OrdinalIgnoreCase)
                                 && VideoExtensions.Contains(Path.GetExtension(f)))
@@ -560,6 +571,7 @@ namespace Emby.Subremover.Core
                 sub.WayOff ? string.Format(WayOffNote, sub.Result.Needs())
                 : sub.KeptInSync ? string.Format(DeleteNote, off, sub.KeptInstead) : string.Format(BetterCopyNote, off, sub.KeptInstead));
             Interlocked.Increment(ref Deleted);
+            if (sub.WayOff) Interlocked.Increment(ref WayOffDeleted);
             lock (state) state.TimingChecked.Remove(sub.Path);
             return removed.BackupPath != null ? $" (backup: {removed.BackupPath})" : " (no backup kept)";
         }
@@ -623,8 +635,8 @@ namespace Emby.Subremover.Core
         /// <summary>"3 subtitle files moved, 1 deleted..." for the logs and the settings page.</summary>
         public string Describe() =>
             (_countOnly
-                ? $"{FilesChecked} subtitle files of {VideosChecked} videos checked: {Shifted} would be moved, {Deleted} deleted (an in-sync copy is there), {LeftAlone} left alone (need more than a shift); nothing changed"
-                : $"{FilesChecked + FilesFromPlan} subtitle files of {VideosChecked + FromPlan} videos checked: {Shifted} moved, {Deleted} deleted (an in-sync copy was there), {LeftAlone} left alone (need more than a shift)") +
+                ? $"{FilesChecked} subtitle files of {VideosChecked} videos checked: {Shifted} would be moved, {Deleted} deleted, {LeftAlone} left alone (need more than a shift); nothing changed"
+                : $"{FilesChecked + FilesFromPlan} subtitle files of {VideosChecked + FromPlan} videos checked: {Shifted} moved, {Deleted} deleted, {LeftAlone} left alone (need more than a shift)") +
             (WayOffDeleted > 0 ? $", {WayOffDeleted} of the deleted {(_countOnly ? "would go" : "went")} for being way off (English)" : "") +
             (FromPlan > 0 ? $", {FromPlan} videos done from the scan run without measuring again" : "") +
             (Rescanned > 0 ? $", {Rescanned} measured again because the video or a subtitle file changed since the scan" : "") +

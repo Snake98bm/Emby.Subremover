@@ -268,6 +268,7 @@ namespace Emby.Subremover.Core
             }
 
             var finished = false;
+            var usedToday = 0;
             await OneAtATime.WaitAsync(ct).ConfigureAwait(false);
             try
             {
@@ -281,6 +282,7 @@ namespace Emby.Subremover.Core
                 {
                     var today = DateTime.UtcNow.Date;
                     var used = _store.DownloadsOn(today);
+                    usedToday = used;
                     if (used + languages.Count > downloadsPerDay)
                     {
                         if (_limitLoggedFor != today)
@@ -296,8 +298,10 @@ namespace Emby.Subremover.Core
                     }
                 }
 
+                var overLimit = false;
                 foreach (var language in languages)
                 {
+                    if (overLimit) break;
                     var matches = (await _subtitles.SearchSubtitles(item, language, true, false, null, ct).ConfigureAwait(false) ?? Array.Empty<MediaBrowser.Model.Providers.RemoteSubtitleInfo>())
                         .Where(r => r.IsHashMatch == true && r.IsForced != true && r.ProviderName != OcrProviderName)
                         .OrderBy(r => r.IsHearingImpaired == true)
@@ -330,6 +334,15 @@ namespace Emby.Subremover.Core
                         if (tries++ == MaxTries)
                         {
                             _log.Info($"{_plugin}: gave up on hash-matched {language} subtitles for {path} after {MaxTries} that weren't {language}");
+                            break;
+                        }
+                        // Downloads rejected as the wrong language count too: never go past the day's limit.
+                        if (mode == HashMode.Download && downloadsPerDay > 0
+                            && usedToday + record.Downloaded.Count + record.Rejected >= downloadsPerDay)
+                        {
+                            _log.Info($"{_plugin}: the {downloadsPerDay} hash-matched subtitle downloads allowed today are used up; " +
+                                      $"no more downloads for {path}");
+                            overLimit = true;
                             break;
                         }
                         var saved = await _subtitles.DownloadSubtitles(item, match.Id, ct).ConfigureAwait(false);
@@ -366,9 +379,20 @@ namespace Emby.Subremover.Core
             }
             finally
             {
-                // Saved before the next video takes its turn, so the daily count is right for it.
-                if (mode == HashMode.Download && finished) _store.Add(path, record);
-                OneAtATime.Release();
+                try
+                {
+                    // Saved before the next video takes its turn, so the daily count is right for it.
+                    if (mode == HashMode.Download && finished) _store.Add(path, record);
+                }
+                catch (Exception ex)
+                {
+                    // Never leaves the semaphore taken: that would hang every later look-up until Emby restarts.
+                    _log.Warn($"{_plugin}: couldn't save the hash record of {path} ({ex.Message}); it may be looked up again next run");
+                }
+                finally
+                {
+                    OneAtATime.Release();
+                }
             }
 
             result.Downloaded.AddRange(record.Downloaded);
