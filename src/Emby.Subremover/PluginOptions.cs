@@ -270,6 +270,15 @@ namespace Emby.Subremover
         [VisibleCondition(nameof(ResumeInterruptedRuns), SimpleCondition.IsTrue)]
         public bool ResumeAfterRestart { get; set; } = true;
 
+        [DisplayName("Install updates automatically")]
+        [Description("Once a day, checks GitHub for a newer SubRemover release and installs it. It starts working when Emby restarts.")]
+        public bool AutoUpdate { get; set; } = true;
+
+        [DisplayName("...restart Emby to finish an update when nothing is playing")]
+        [Description("Off: the update starts working the next time Emby restarts; the dashboard says a restart is needed.")]
+        [VisibleCondition(nameof(AutoUpdate), SimpleCondition.IsTrue)]
+        public bool RestartForUpdate { get; set; }
+
         [DisplayName("Show in the server sidebar menu (to see the change: click Save, then hold Ctrl and press F5)")]
         [Description("Also lists SubRemover in the server sidebar. Ctrl+F5 reloads the Emby page fully; a plain F5 can still show the old menu.")]
         public bool ShowInSidebar { get; set; } = true;

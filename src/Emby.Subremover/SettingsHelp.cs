@@ -47,6 +47,21 @@ namespace Emby.Subremover
             (SettingsTabId.Run, "...start it again when Emby starts",
                 "After Emby restarts, an interrupted run is started again by itself about 3 minutes later. Off: it waits for the next " +
                 "Run now or scheduled run."),
+            (SettingsTabId.Run, "Check for updates now",
+                "Asks GitHub for SubRemover's newest release. If it's newer and 'Install updates automatically' is on, it's " +
+                "installed. Install now installs it either way. The check also runs by itself once a day at 4:30 AM; to change the " +
+                "time, go to Scheduled Tasks > SubRemover > Check for SubRemover updates."),
+            (SettingsTabId.Run, "Install updates automatically",
+                "Once a day SubRemover asks GitHub (github.com/" + Core.GitHubReleaseSource.Repository + ") for its newest release. " +
+                "If that's newer than the one running, its DLL is downloaded and checked: the size and SHA-256 GitHub lists, and " +
+                "that it really is SubRemover with that version. Then it takes the place of the current DLL in Emby's plugins " +
+                "folder. Emby only loads plugins when it starts, so the new version starts working at the next restart, and the " +
+                "dashboard says a restart is needed. A copy of the DLL it replaced is kept in the plugins' configuration folder, " +
+                "under subremover-update/previous. Off: the daily check only says here that a new version is out."),
+            (SettingsTabId.Run, "...restart Emby to finish an update when nothing is playing",
+                "After installing an update, restarts Emby once nobody is watching and no scheduled task is running. It waits up to " +
+                "4 hours, otherwise the update waits for the next restart. Emby is restarted only once for each release. Some " +
+                "setups (some Linux services and Docker) can't restart Emby from inside; restart it yourself there."),
             (SettingsTabId.Run, "Videos to check at once",
                 "Checking a video (reading its tracks, the language check, deciding what to do) runs for this many videos side by " +
                 "side, which makes Test mode runs several times faster. Changing a video (rewriting it, OCR) still happens one at a " +

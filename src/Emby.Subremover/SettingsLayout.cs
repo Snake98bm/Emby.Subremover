@@ -40,6 +40,7 @@ namespace Emby.Subremover
         internal const string AdsWidget = "subAds";
         internal const string TimingWidget = "subTiming";
         internal const string ErrorsWidget = "errors";
+        internal const string UpdateWidget = "update";
 
         internal sealed class TabLayout
         {
@@ -67,6 +68,10 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.ProcessNewVideos)),
                     F(nameof(PluginOptions.ResumeInterruptedRuns)),
                     F(nameof(PluginOptions.ResumeAfterRestart)),
+                    H("Updates"),
+                    W(UpdateWidget),
+                    F(nameof(PluginOptions.AutoUpdate)),
+                    F(nameof(PluginOptions.RestartForUpdate)),
                     H("Advanced"),
                     F(nameof(PluginOptions.VideosAtOnce)),
                     F(nameof(PluginOptions.ShowInSidebar)),

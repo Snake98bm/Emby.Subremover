@@ -162,6 +162,37 @@ namespace Emby.Subremover
         public bool Now { get; set; }
     }
 
+    [Route("/SubRemover/Update", "POST", Summary = "Checks GitHub for a newer SubRemover release, or installs it", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class StartUpdate : IReturn<UpdateStatusDto>
+    {
+        /// <summary>Install the newest release even when installing automatically is off; otherwise only check.</summary>
+        public bool Install { get; set; }
+    }
+
+    [Route("/SubRemover/Update/Status", "GET", Summary = "The update status line", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class GetUpdateStatus : IReturn<UpdateStatusDto>
+    {
+    }
+
+    public class UpdateStatusDto
+    {
+        public StatusDto Status { get; set; }
+
+        /// <summary>The newer version Install now would install; null when there's none.</summary>
+        public string Available { get; set; }
+
+        /// <summary>The newest release's page on GitHub.</summary>
+        public string ReleaseUrl { get; set; }
+
+        internal static UpdateStatusDto Current(Plugin plugin)
+        {
+            var (status, available, url) = plugin.UpdateStatus();
+            return new UpdateStatusDto { Status = StatusDto.From(status), Available = available, ReleaseUrl = url };
+        }
+    }
+
     public class FailureListDto
     {
         public int MaxAttempts { get; set; }
@@ -206,6 +237,7 @@ namespace Emby.Subremover
         public StatusDto HashStatus { get; set; }
         public AdStatusDto AdStatus { get; set; }
         public TimingStatusDto TimingStatus { get; set; }
+        public UpdateStatusDto UpdateStatus { get; set; }
         public string BackupCount { get; set; }
         public List<string> Logs { get; set; }
     }
@@ -360,6 +392,7 @@ namespace Emby.Subremover
                 HashStatus = StatusDto.From(plugin.HashStatus()),
                 AdStatus = AdStatusDto.Current(plugin),
                 TimingStatus = TimingStatusDto.Current(plugin),
+                UpdateStatus = UpdateStatusDto.Current(plugin),
                 BackupCount = plugin.BackupCountText(),
                 Logs = SafeLogList()
             };
@@ -529,6 +562,16 @@ namespace Emby.Subremover
                 LogDownloadUrl = GetSubremoverLog.Link(FailureLog.FileName, key, download: true)
             };
         }
+
+        public object Post(StartUpdate request)
+        {
+            var started = Plugin.StartUpdate(request.Install);
+            var dto = UpdateStatusDto.Current(Plugin);
+            dto.Status = StatusDto.From(started);
+            return dto;
+        }
+
+        public object Get(GetUpdateStatus request) => UpdateStatusDto.Current(Plugin);
 
         public object Post(RetryFailures request) =>
             StatusDto.From(Plugin.RetryFailed((request.Paths ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries), request.Now));
