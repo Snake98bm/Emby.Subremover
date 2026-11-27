@@ -105,6 +105,17 @@ namespace Emby.Subremover.Core
                 var results = await Task.WhenAll(models.Select((best, i) => runner.RunFfmpeg(
                     FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temps[i], Tessdata.Folder(best)), ct, tessdata.Root))).ConfigureAwait(false);
 
+                // Some Linux servers refuse to start ffmpeg in the data folder ("No such file or directory", though it's
+                // there). Then it runs where Emby runs, with the whole path to the language files in the filter instead.
+                if (results.Any(r => r.StartFailed))
+                {
+                    var first = results.First(r => r.StartFailed).StdErr;
+                    results = await Task.WhenAll(models.Select((best, i) => runner.RunFfmpeg(
+                        FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temps[i], Path.Combine(tessdata.Root, Tessdata.Folder(best))), ct))).ConfigureAwait(false);
+                    var again = results.FirstOrDefault(r => r.StartFailed);
+                    if (again != null) return $"ffmpeg couldn't be started for OCR: {first}; and without a working folder: {again.StdErr}";
+                }
+
                 for (var i = 0; i < results.Length; i++)
                 {
                     var failure = !results[i].Success
