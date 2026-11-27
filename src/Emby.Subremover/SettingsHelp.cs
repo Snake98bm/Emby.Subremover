@@ -59,7 +59,7 @@ namespace Emby.Subremover
                 "dashboard says a restart is needed. A copy of the DLL it replaced is kept in the plugins' configuration folder, " +
                 "under subremover-update/previous. Off: the daily check only says here that a new version is out."),
             (SettingsTabId.Run, "...restart Emby to finish an update when nothing is playing",
-                "After installing an update, restarts Emby once nobody is watching and no scheduled task is running. It waits up to " +
+                "After installing an update, restarts Emby once nobody is watching, no scheduled task is running and no Live TV recording is in progress. It waits up to " +
                 "4 hours, otherwise the update waits for the next restart. Emby is restarted only once for each release. Some " +
                 "setups (some Linux services and Docker) can't restart Emby from inside; restart it yourself there."),
             (SettingsTabId.Run, "Videos to check at once",

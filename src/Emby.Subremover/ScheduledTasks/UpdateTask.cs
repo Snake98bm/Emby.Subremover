@@ -5,7 +5,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Emby.Subremover.Core;
 using MediaBrowser.Common;
+using MediaBrowser.Controller.LiveTv;
 using MediaBrowser.Controller.Session;
+using MediaBrowser.Model.LiveTv;
 using MediaBrowser.Model.Logging;
 using MediaBrowser.Model.Tasks;
 
@@ -85,6 +87,14 @@ namespace Emby.Subremover.ScheduledTasks
             var waitUntil = DateTime.UtcNow + RestartWaitLimit;
             while (true)
             {
+                // The setting can be turned off while this waits.
+                var now = plugin.Options;
+                if (!now.AutoUpdate || !now.RestartForUpdate)
+                {
+                    _log.Info("SubRemover: v{0} is installed; restarting Emby for updates was turned off, so it starts working at the next restart", version);
+                    return;
+                }
+
                 var busy = WhatsBusy();
                 if (busy == null) break;
                 if (DateTime.UtcNow >= waitUntil)
@@ -113,9 +123,27 @@ namespace Emby.Subremover.ScheduledTasks
             if (Plugin.Instance?.NewVideos.Count > 0) return "new videos are waiting for their run";
             var playing = _sessions.Sessions.Count(s => s.NowPlayingItem != null);
             if (playing > 0) return playing == 1 ? "someone is watching" : playing + " people are watching";
-            if (_tasks.ScheduledTasks.Any(w => w.State == TaskState.Running && !(w.ScheduledTask is UpdateTask)))
+            if (_tasks.ScheduledTasks.Any(w => w.State != TaskState.Idle && !(w.ScheduledTask is UpdateTask)))
                 return "other scheduled tasks are running";
+            if (IsRecording()) return "a Live TV recording is in progress";
             return null;
+        }
+
+        // A restart would cut a Live TV recording short. If Live TV can't be asked, that's taken as recording.
+        private bool IsRecording()
+        {
+            var liveTv = _host.TryResolve<ILiveTvManager>();
+            if (liveTv == null) return false;
+            try
+            {
+                var timers = liveTv.GetTimers(new TimerQuery { IsActive = true });
+                return timers?.Items != null && timers.Items.Any(t => t.Status == RecordingStatus.InProgress);
+            }
+            catch (Exception ex)
+            {
+                _log.Debug("SubRemover: couldn't ask Live TV about recordings ({0}); not restarting Emby for now", ex.Message);
+                return true;
+            }
         }
     }
 }
