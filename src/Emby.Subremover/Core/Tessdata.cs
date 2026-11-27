@@ -102,16 +102,24 @@ namespace Emby.Subremover.Core
             {
                 // With both models, two ffmpeg processes run at the same time, each on its own CPU core
                 // (Emby's ffmpeg runs two filters in one process one after the other).
-                var results = await Task.WhenAll(models.Select((best, i) => runner.RunFfmpeg(
-                    FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temps[i], Tessdata.Folder(best)), ct, tessdata.Root))).ConfigureAwait(false);
+                // Two ways to tell the filter where the language files are: a relative "tessdata/" with ffmpeg started in
+                // the data folder, or the whole path with ffmpeg started where Emby runs.
+                Task<ProcessResult[]> RunAll(bool wholePath) => Task.WhenAll(models.Select((best, i) => runner.RunFfmpeg(
+                    FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temps[i],
+                        wholePath ? Path.Combine(tessdata.Root, Tessdata.Folder(best)) : Tessdata.Folder(best)),
+                    ct, wholePath ? null : tessdata.Root)));
 
-                // Some Linux servers refuse to start ffmpeg in the data folder ("No such file or directory", though it's
-                // there). Then it runs where Emby runs, with the whole path to the language files in the filter instead.
+                // Emby's ffmpeg on Linux only starts in Emby's own folder (its loader is the relative "lib/ld-linux-x86-64.so.2"):
+                // anywhere else the start fails with "No such file or directory". So there it gets the whole path. On
+                // Windows the data folder way stays (a drive colon needs double escaping in a filter graph), with the
+                // whole path as the second try.
+                var wholePathFirst = Path.DirectorySeparatorChar != '\\';
+                var results = await RunAll(wholePathFirst).ConfigureAwait(false);
                 if (results.Any(r => r.StartFailed))
                 {
                     var first = results.First(r => r.StartFailed).StdErr;
-                    results = await Task.WhenAll(models.Select((best, i) => runner.RunFfmpeg(
-                        FfmpegArgs.Ocr(videoPath, job.Stream.index, job.TesseractLanguage, temps[i], Path.Combine(tessdata.Root, Tessdata.Folder(best))), ct))).ConfigureAwait(false);
+                    if (wholePathFirst) return "ffmpeg couldn't be started for OCR: " + first;
+                    results = await RunAll(true).ConfigureAwait(false);
                     var again = results.FirstOrDefault(r => r.StartFailed);
                     if (again != null) return $"ffmpeg couldn't be started for OCR: {first}; and without a working folder: {again.StdErr}";
                 }
