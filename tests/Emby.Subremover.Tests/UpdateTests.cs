@@ -33,15 +33,16 @@ public class UpdateTests : IDisposable
         public string FileToServe = BuiltDll;
         public Exception Throw;
         public int Downloads;
+        public TimeSpan Delay;
 
         public Task<GitHubRelease> Latest(CancellationToken cancellationToken) =>
             Throw != null ? Task.FromException<GitHubRelease>(Throw) : Task.FromResult(Release);
 
-        public Task Download(string url, string toFile, long maxBytes, CancellationToken cancellationToken)
+        public async Task Download(string url, string toFile, long maxBytes, CancellationToken cancellationToken)
         {
             Downloads++;
+            if (Delay > TimeSpan.Zero) await Task.Delay(Delay, cancellationToken);
             File.Copy(FileToServe, toFile, true);
-            return Task.CompletedTask;
         }
     }
 
@@ -50,7 +51,7 @@ public class UpdateTests : IDisposable
         tag_name = "v" + v,
         html_url = "https://github.com/Snake98bm/Emby.Subremover/releases/tag/v" + v,
         assets = withAsset
-            ? new List<GitHubAsset> { new() { name = "Emby.Subremover.dll", size = new FileInfo(BuiltDll).Length, digest = Sha256(BuiltDll), browser_download_url = "https://example.invalid/Emby.Subremover.dll" } }
+            ? new List<GitHubAsset> { new() { name = "Emby.Subremover.dll", size = new FileInfo(BuiltDll).Length, digest = Sha256(BuiltDll), browser_download_url = Updater.DownloadUrlStart + "v" + v + "/Emby.Subremover.dll" } }
             : new List<GitHubAsset>()
     };
 
@@ -304,6 +305,91 @@ public class UpdateTests : IDisposable
         Assert.Equal(UpdateOutcome.UpToDate, await updater.Run(true, false, null, CancellationToken.None));
         Assert.Null(store.Load().InstalledVersion);
         Assert.Null(store.Load().RestartedFor);
+    }
+
+    // ---- found in the code review
+
+    [Fact]
+    public async Task A_local_alpha_build_with_the_releases_numbers_is_replaced_by_the_release()
+    {
+        // "1.0.7-alpha.3" has assembly version 1.0.7.0, like release 1.0.7: only the file itself tells them apart.
+        var source = new FakeSource { Release = ReleaseOf(BuiltVersion) };
+        var (updater, store, target) = Make(source, BuiltVersion + "-alpha.3");
+        File.WriteAllBytes(target, File.ReadAllBytes(BuiltDll).Concat(new byte[] { 0, 0, 0, 0 }).ToArray());
+        Assert.True(PluginVersion.From(System.Reflection.AssemblyName.GetAssemblyName(target).Version!).SameNumbers(BuiltVersion));
+
+        Assert.Equal(UpdateOutcome.Installed, await updater.Run(true, false, null, CancellationToken.None));
+
+        Assert.Equal(1, source.Downloads);
+        Assert.Equal(File.ReadAllBytes(BuiltDll), File.ReadAllBytes(target));
+        Assert.Equal(UpdateOutcome.WaitingForRestart, await updater.Run(true, false, null, CancellationToken.None));
+        Assert.Equal(1, source.Downloads);
+    }
+
+    [Fact]
+    public async Task Only_this_repositorys_own_download_and_release_page_are_used()
+    {
+        var release = ReleaseOf(BuiltVersion);
+        release.assets[0].browser_download_url = "https://example.invalid/Emby.Subremover.dll";
+        release.html_url = "javascript:alert(1)";
+        var source = new FakeSource { Release = release };
+        var (updater, store, target) = Make(source, Older.ToString());
+
+        Assert.Equal(UpdateOutcome.Failed, await updater.Run(true, false, null, CancellationToken.None));
+
+        Assert.Equal(0, source.Downloads);
+        Assert.Equal("the old plugin", File.ReadAllText(target));
+        Assert.Contains("download address isn't under https://github.com/Snake98bm/Emby.Subremover/releases/download/", store.Load().Problem);
+        Assert.Null(store.Load().ReleaseUrl);
+    }
+
+    [Fact]
+    public async Task A_download_that_stalls_is_given_up_on_and_the_plugin_is_left_alone()
+    {
+        var source = new FakeSource { Release = ReleaseOf(BuiltVersion), Delay = TimeSpan.FromMinutes(5) };
+        var (updater, store, target) = Make(source, Older.ToString());
+        updater.DownloadTimeLimit = TimeSpan.FromMilliseconds(100);
+
+        Assert.Equal(UpdateOutcome.Failed, await updater.Run(true, false, null, CancellationToken.None));
+
+        Assert.Contains("took longer than", store.Load().Problem);
+        Assert.Equal("the old plugin", File.ReadAllText(target));
+    }
+
+    [Fact]
+    public async Task Stopping_the_task_during_the_download_stops_it_without_a_problem_note()
+    {
+        var source = new FakeSource { Release = ReleaseOf(BuiltVersion), Delay = TimeSpan.FromMinutes(5) };
+        var (updater, store, target) = Make(source, Older.ToString());
+        using var stop = new CancellationTokenSource(100);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => updater.Run(true, false, null, stop.Token));
+
+        Assert.Null(store.Load().Problem);
+        Assert.Equal("the old plugin", File.ReadAllText(target));
+    }
+
+    [Fact]
+    public void A_problem_shows_even_while_an_installed_version_waits_for_the_restart()
+    {
+        var state = new UpdateState
+        {
+            LastCheckUtc = DateTime.UtcNow, LatestVersion = BuiltVersion.ToString(), InstalledVersion = BuiltVersion.ToString(),
+            Problem = "Emby was restarted for it, but the old one is still running."
+        };
+        var (text, status, _) = Updater.Describe(state, Older, true);
+        Assert.StartsWith("Emby was restarted for it", text);
+        Assert.Contains($"v{BuiltVersion} is in the plugins folder; running v{Older}.", text);
+        Assert.Equal(ItemStatus.Failed, status);
+    }
+
+    [Fact]
+    public void The_state_file_is_replaced_whole_and_survives_many_saves()
+    {
+        var store = new UpdateStateStore(Path.Combine(_dir, "config"), new TestJsonSerializer());
+        for (var i = 0; i < 20; i++) store.Save(new UpdateState { LatestVersion = "1.0." + i });
+        Assert.Equal("1.0.19", store.Load().LatestVersion);
+        Assert.Equal(new[] { UpdateStateStore.FileName }, Directory.GetFiles(Path.Combine(_dir, "config")).Select(Path.GetFileName));
     }
 
     [Fact]

@@ -52,7 +52,8 @@ namespace Emby.Subremover.Core
             if (before != null && before == after) return note;
 
             // Only root can give a file away to another user; changing to a group Emby belongs to may still work.
-            var chown = run("chown", "--reference=" + FfmpegArgs.Quote(source) + " " + FfmpegArgs.Quote(target));
+            // By ids when stat gave them: BusyBox's chown (Emby's Docker image) has no --reference.
+            var chown = run("chown", (before ?? "--reference=" + FfmpegArgs.Quote(source)) + " " + FfmpegArgs.Quote(target));
             if (chown.ExitCode != 0)
             {
                 var error = string.IsNullOrWhiteSpace(chown.Error) ? "chown exited with " + chown.ExitCode : chown.Error.Trim();

@@ -23,8 +23,8 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly ILogger _log;
 
         // How long a restart waits for playback and other tasks to finish, and how often it looks.
-        internal static TimeSpan RestartWaitLimit = TimeSpan.FromHours(4);
-        internal static TimeSpan RestartWaitStep = TimeSpan.FromMinutes(5);
+        internal static readonly TimeSpan RestartWaitLimit = TimeSpan.FromHours(4);
+        internal static readonly TimeSpan RestartWaitStep = TimeSpan.FromMinutes(5);
 
         public UpdateTask(IApplicationHost host, ISessionManager sessions, ITaskManager tasks, ILogManager logManager)
         {
@@ -109,6 +109,8 @@ namespace Emby.Subremover.ScheduledTasks
         private string WhatsBusy()
         {
             if (TaskGate.IsBusy) return "another SubRemover task is running";
+            // New videos waiting for their run are only remembered until Emby stops.
+            if (Plugin.Instance?.NewVideos.Count > 0) return "new videos are waiting for their run";
             var playing = _sessions.Sessions.Count(s => s.NowPlayingItem != null);
             if (playing > 0) return playing == 1 ? "someone is watching" : playing + " people are watching";
             if (_tasks.ScheduledTasks.Any(w => w.State == TaskState.Running && !(w.ScheduledTask is UpdateTask)))

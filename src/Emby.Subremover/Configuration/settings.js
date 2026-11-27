@@ -801,11 +801,15 @@ define([], function () {
         }
 
         function startUpdate(install) {
-            postJson('SubRemover/Update', { Install: install }).then(function (u) {
-                showUpdate(u);
-                pollUpdate(u.Status);
-            }, function (err) {
-                errorText(err).then(function (t) { showStatus(el('srUpdateStatus'), { Caption: 'Updates', Text: 'Could not start: ' + t, State: 'Failed' }); });
+            // Unsaved changes are saved first, so the check goes by "Install updates automatically" as the page shows it.
+            (dirty ? save() : Promise.resolve(true)).then(function (ok) {
+                if (!ok) return;
+                postJson('SubRemover/Update', { Install: install }).then(function (u) {
+                    showUpdate(u);
+                    pollUpdate(u.Status);
+                }, function (err) {
+                    errorText(err).then(function (t) { showStatus(el('srUpdateStatus'), { Caption: 'Updates', Text: 'Could not start: ' + t, State: 'Failed' }); });
+                });
             });
         }
 

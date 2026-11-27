@@ -87,8 +87,9 @@ namespace Emby.Subremover.Core
                 Directory.CreateDirectory(Path.GetDirectoryName(_path));
                 var temp = _path + ".tmp";
                 File.WriteAllText(temp, _json.SerializeToString(state));
-                if (File.Exists(_path)) File.Delete(_path);
-                File.Move(temp, _path);
+                // Replaced in one step, so the settings page never reads a half-written or missing file.
+                if (File.Exists(_path)) File.Replace(temp, _path, null);
+                else File.Move(temp, _path);
             }
         }
     }
@@ -185,6 +186,13 @@ namespace Emby.Subremover.Core
         internal const string Caption = "Updates";
         private const long MaxDownloadBytes = 100L * 1024 * 1024;
 
+        // Only this repository's own pages and release files are linked or downloaded, whatever the answer says.
+        internal const string RepositoryUrl = "https://github.com/" + GitHubReleaseSource.Repository + "/";
+        internal const string DownloadUrlStart = RepositoryUrl + "releases/download/";
+
+        // A download that stalls is given up on; the next daily check tries again.
+        internal TimeSpan DownloadTimeLimit { get; set; } = TimeSpan.FromMinutes(15);
+
         private readonly IReleaseSource _source;
         private readonly UpdateStateStore _store;
         private readonly PluginVersion _running;
@@ -228,7 +236,7 @@ namespace Emby.Subremover.Core
 
                 Latest = latest;
                 state.LatestVersion = latest.ToString();
-                state.ReleaseUrl = release.html_url;
+                state.ReleaseUrl = release.html_url != null && release.html_url.StartsWith(RepositoryUrl, StringComparison.OrdinalIgnoreCase) ? release.html_url : null;
                 state.Problem = null;
 
                 if (!latest.IsNewerThan(_running))
@@ -239,7 +247,11 @@ namespace Emby.Subremover.Core
                     return Done(state, UpdateOutcome.UpToDate);
                 }
 
-                if (UpdateInstaller.FileHasVersion(_pluginFile, latest))
+                var asset = release.assets?.FirstOrDefault(a => string.Equals(a.name, AssetName, StringComparison.OrdinalIgnoreCase));
+
+                // Already put in place by an earlier check: the plugin file is the release's own file (same size and SHA-256).
+                // Version numbers alone aren't enough: a local build "1.0.7-alpha.3" has the numbers of release 1.0.7.
+                if (asset != null && asset.size > 0 && UpdateInstaller.Verify(_pluginFile, latest, asset.size, asset.digest) == null)
                 {
                     if (state.RestartedFor == latest.ToString() && !manual)
                     {
@@ -258,16 +270,28 @@ namespace Emby.Subremover.Core
                     return Done(state, UpdateOutcome.Available);
                 }
 
-                var asset = release.assets?.FirstOrDefault(a => string.Equals(a.name, AssetName, StringComparison.OrdinalIgnoreCase));
                 if (asset == null || string.IsNullOrEmpty(asset.browser_download_url))
                     return Fail(state, $"Release v{latest} has no {AssetName} to download.", log);
+                if (!asset.browser_download_url.StartsWith(DownloadUrlStart, StringComparison.OrdinalIgnoreCase))
+                    return Fail(state, $"Release v{latest} was not installed: its download address isn't under {DownloadUrlStart}.", log);
 
                 Directory.CreateDirectory(_workFolder);
                 var download = Path.Combine(_workFolder, AssetName + ".download");
                 try
                 {
                     log?.Invoke($"SubRemover: downloading v{latest} from {asset.browser_download_url}");
-                    await _source.Download(asset.browser_download_url, download, MaxDownloadBytes, cancellationToken).ConfigureAwait(false);
+                    using (var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                    {
+                        limit.CancelAfter(DownloadTimeLimit);
+                        try
+                        {
+                            await _source.Download(asset.browser_download_url, download, MaxDownloadBytes, limit.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            return Fail(state, $"The download of v{latest} took longer than {DownloadTimeLimit.TotalMinutes:0} minutes and was stopped.", log);
+                        }
+                    }
                     var problem = UpdateInstaller.Verify(download, latest, asset.size, asset.digest);
                     if (problem != null) return Fail(state, $"The download of v{latest} was not installed: {problem}.", log);
 
@@ -322,10 +346,12 @@ namespace Emby.Subremover.Core
             PluginVersion.TryParse(state.LatestVersion, out var latest);
             PluginVersion.TryParse(state.InstalledVersion, out var installed);
 
-            if (installed != null && installed.IsNewerThan(running))
-                return ($"v{installed} is installed and starts working when Emby restarts. Running v{running} until then.", warn, null);
+            var waiting = installed != null && installed.IsNewerThan(running);
             if (state.Problem != null)
-                return (state.Problem + checkedAt, ItemStatus.Failed, latest != null && latest.IsNewerThan(running) ? latest.ToString() : null);
+                return (state.Problem + checkedAt + (waiting ? $". v{installed} is in the plugins folder; running v{running}." : ""),
+                    ItemStatus.Failed, latest != null && latest.IsNewerThan(running) ? latest.ToString() : null);
+            if (waiting)
+                return ($"v{installed} is installed and starts working when Emby restarts. Running v{running} until then.", warn, null);
             if (latest != null && latest.IsNewerThan(running))
                 return ($"v{latest} is available; running v{running}" + checkedAt + "." + (installs ? " It's installed at the next daily check, or click Install now." : " Click Install now to install it."), warn, latest.ToString());
             return ($"Up to date: running v{running}, the newest release" + checkedAt + ".", ok, null);
@@ -360,20 +386,6 @@ namespace Emby.Subremover.Core
             if (name.Version == null || !PluginVersion.From(name.Version).SameNumbers(expected))
                 return $"it is version {name.Version}, not {expected}";
             return null;
-        }
-
-        /// <summary>Whether <paramref name="file"/> is SubRemover with the numbers of <paramref name="version"/>.</summary>
-        internal static bool FileHasVersion(string file, PluginVersion version)
-        {
-            try
-            {
-                var name = System.Reflection.AssemblyName.GetAssemblyName(file);
-                return name.Name == Updater.AssemblyName && name.Version != null && PluginVersion.From(name.Version).SameNumbers(version);
-            }
-            catch (Exception)
-            {
-                return false;
-            }
         }
 
         /// <summary>

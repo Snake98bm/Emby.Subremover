@@ -26,7 +26,7 @@ public class UnixOwnerTests : IDisposable
     // stat answers with the given owners; chown always fails, as on a CIFS mount.
     private static UnixPermissions.Runner Share(string sourceOwner, string targetOwner, List<string> calls) => (exe, args) =>
     {
-        calls.Add(exe);
+        calls.Add(exe == "chown" ? exe + " " + args.Split(' ')[0] : exe);
         if (exe == "stat") return (0, args.Contains("subremover-tmp") ? targetOwner + "\n" : sourceOwner + "\n", "");
         return (1, "", "chown: changing ownership of 'x': Operation not permitted\n");
     };
@@ -40,7 +40,7 @@ public class UnixOwnerTests : IDisposable
         var note = UnixPermissions.CopyFrom(Write("Movie.mkv"), Write("Movie.mkv.subremover-tmp"), Share("1000:1000", "1000:1000", calls));
 
         Assert.Null(note);
-        Assert.DoesNotContain("chown", calls);
+        Assert.DoesNotContain(calls, c => c.StartsWith("chown"));
     }
 
     [Fact]
@@ -51,7 +51,8 @@ public class UnixOwnerTests : IDisposable
 
         var note = UnixPermissions.CopyFrom(Write("Movie.mkv"), Write("Movie.mkv.subremover-tmp"), Share("0:0", "1000:1000", calls));
 
-        Assert.Contains("chown", calls);
+        // By ids, which BusyBox's chown (Emby's Docker image) understands; it has no --reference.
+        Assert.Contains("chown 0:0", calls);
         Assert.Equal("the file was updated, but it keeps owner/group 1000:1000 instead of the original's 0:0 " +
                      "(chown: changing ownership of 'x': Operation not permitted)", note);
     }
@@ -63,12 +64,12 @@ public class UnixOwnerTests : IDisposable
         var calls = new List<string>();
         UnixPermissions.Runner noStat = (exe, args) =>
         {
-            calls.Add(exe);
+            calls.Add(exe == "chown" ? exe + " " + args.Substring(0, 12) : exe);
             return exe == "stat" ? (1, "", "stat: illegal option -- c") : (0, "", "");
         };
 
         Assert.Null(UnixPermissions.CopyFrom(Write("Movie.mkv"), Write("Movie.mkv.subremover-tmp"), noStat));
-        Assert.Contains("chown", calls);
+        Assert.Contains("chown --reference=", calls);
     }
 
     [Fact]
