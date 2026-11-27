@@ -16,6 +16,25 @@ namespace Emby.Subremover.Core
         public string StdOut { get; set; }
         public string StdErr { get; set; }
         public bool Success => ExitCode == 0;
+
+        /// <summary>The program never ran: the system refused to start it (StdErr says why).</summary>
+        public bool StartFailed { get; set; }
+
+        /// <summary>
+        /// Why a process couldn't start, with what can be checked from here. On Linux .NET reports a working folder it
+        /// can't enter and a program it can't run with the same "No such file or directory", so both are looked at.
+        /// </summary>
+        internal static ProcessResult CouldNotStart(string exe, string workingDirectory, Exception ex)
+        {
+            string Exists(Func<bool> check) { try { return check() ? "found" : "NOT found"; } catch (Exception) { return "can't tell"; } }
+            var where = string.IsNullOrEmpty(workingDirectory) ? "" : $" in {workingDirectory} (folder {Exists(() => Directory.Exists(workingDirectory))})";
+            return new ProcessResult
+            {
+                ExitCode = -1,
+                StartFailed = true,
+                StdErr = $"couldn't start {exe} (program {Exists(() => File.Exists(exe))}){where}: {ex.Message}"
+            };
+        }
     }
 
     public class FfmpegRunner
@@ -64,7 +83,11 @@ namespace Emby.Subremover.Core
             using (var proc = new Process { StartInfo = psi })
             {
                 proc.ErrorDataReceived += (s, e) => { if (e.Data != null && stderr.Length < 16000) stderr.AppendLine(e.Data); };
-                proc.Start();
+                try { proc.Start(); }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException)
+                {
+                    return (ProcessResult.CouldNotStart(psi.FileName, null, ex), default(T));
+                }
                 try { proc.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception) { }
                 proc.BeginErrorReadLine();
                 T value;
@@ -107,7 +130,12 @@ namespace Emby.Subremover.Core
                 proc.ErrorDataReceived += (s, e) => { if (e.Data != null && stderr.Length < 16000) stderr.AppendLine(e.Data); };
                 proc.Exited += (s, e) => exited.TrySetResult(true);
 
-                proc.Start();
+                // A program or working folder the system can't use: a failure with the reason, not an error that stops the video.
+                try { proc.Start(); }
+                catch (Exception ex) when (ex is System.ComponentModel.Win32Exception || ex is InvalidOperationException)
+                {
+                    return ProcessResult.CouldNotStart(exe, workingDirectory, ex);
+                }
                 // Background work: playback and Emby's own transcoding come first. (On Linux this is a higher nice value.)
                 try { proc.PriorityClass = ProcessPriorityClass.BelowNormal; } catch (Exception) { }
                 proc.BeginOutputReadLine();

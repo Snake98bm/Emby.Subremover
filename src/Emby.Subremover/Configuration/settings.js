@@ -90,6 +90,7 @@ define([], function () {
             try { sessionStorage.setItem('subRemoverTab', id); } catch (e) { }
             if (id === 'Logs') loadLog(null);
             if (id === 'Backups') loadReasons();
+            if (id === 'Errors') loadErrors();
         }
 
         // ---------------------------------------------------------------- settings
@@ -671,7 +672,121 @@ define([], function () {
             });
         }
 
-        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget, subTiming: timingWidget };
+        // ---------------------------------------------------------------- Errors tab
+
+        function errorsWidget() {
+            return h('div', {}, [
+                h('h3', { text: 'Videos that failed' }),
+                h('div', { class: 'sr-buttons' }, [
+                    h('button', { type: 'button', class: 'sr-btn', text: '⟳ Refresh', onclick: loadErrors }),
+                    h('span', { class: 'sr-muted', text: 'Videos that failed in recent runs. Tick some to retry them.' })
+                ]),
+                h('div', { class: 'sr-status', id: 'srErrorsStatus', role: 'status' }),
+                h('div', { id: 'srErrorsList' }),
+                h('h3', { text: 'What\'s been going on' }),
+                h('div', { class: 'sr-help', text: 'Every failure, skip and retry across runs, newest first (subremover-failures.log in Emby\'s log folder). Each line names the run log with the details.' }),
+                h('div', { class: 'sr-buttons' }, [
+                    h('a', { class: 'sr-btn', id: 'srFailLogOpen', target: '_blank', rel: 'noopener', text: 'Open in a new window ↗' }),
+                    h('a', { class: 'sr-btn', id: 'srFailLogDownload', text: '⬇ Download' })
+                ]),
+                h('textarea', { id: 'srFailLogText', rows: 16, readonly: true, spellcheck: 'false' })
+            ]);
+        }
+
+        // after: a status to show once the list is drawn again (what Retry said), instead of the list's own summary.
+        function loadErrors(after) {
+            var list = el('srErrorsList');
+            var status = el('srErrorsStatus');
+            if (!list) return;
+            getJson('SubRemover/Failures').then(function (r) {
+                el('srFailLogText').value = r.LogText || 'Nothing yet.';
+                el('srFailLogOpen').href = r.LogOpenUrl;
+                el('srFailLogDownload').href = r.LogDownloadUrl;
+                drawErrors(r);
+                if (after && after.Text) showStatus(status, after);
+            }, function (err) {
+                errorText(err).then(function (t) { showStatus(status, { Caption: 'Errors', Text: 'Couldn\'t list the failed videos: ' + t, State: 'Failed' }); });
+            });
+        }
+
+        function drawErrors(r) {
+            var list = el('srErrorsList');
+            var status = el('srErrorsStatus');
+            list.innerHTML = '';
+            var items = r.Items || [];
+            var skipped = items.filter(function (x) { return x.Skipped; }).length;
+            if (!items.length) {
+                showStatus(status, { Caption: 'Errors', Text: 'No video has failed since it last worked.', State: 'Succeeded' });
+                return;
+            }
+            showStatus(status, { Caption: 'Errors', State: skipped ? 'Warning' : 'None', Text:
+                items.length + (items.length === 1 ? ' video has' : ' videos have') + ' failed recently' +
+                (r.MaxAttempts > 0 ? '; ' + skipped + ' of them ' + (skipped === 1 ? 'is' : 'are') + ' skipped by runs now (failed ' + r.MaxAttempts + ' runs in a row).'
+                    : '. Stop trying is off (0), so every run tries them again.') });
+
+            var boxes = [];
+            var retryBtn = h('button', { type: 'button', class: 'sr-btn sr-primary', text: '↻ Retry now', disabled: true, onclick: function () { retry(true); } });
+            var laterBtn = h('button', { type: 'button', class: 'sr-btn', text: 'Retry on next run', disabled: true, onclick: function () { retry(false); } });
+            var all = h('input', { type: 'checkbox', title: 'Select all', onchange: function () {
+                boxes.forEach(function (b) { b.checked = all.checked; });
+                update();
+            } });
+            function update() {
+                var n = boxes.filter(function (b) { return b.checked; }).length;
+                retryBtn.disabled = laterBtn.disabled = n === 0;
+                retryBtn.textContent = n > 1 ? '↻ Retry ' + n + ' now' : '↻ Retry now';
+                all.checked = n > 0 && n === boxes.length;
+            }
+            function retry(now) {
+                var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b._path; });
+                if (!picked.length) return;
+                retryBtn.disabled = laterBtn.disabled = true;
+                postJson('SubRemover/Failures/Retry', { Paths: picked.join('\n'), Now: now }).then(function (s) {
+                    loadErrors(s);
+                }, function (err) {
+                    errorText(err).then(function (t) { showStatus(status, { Caption: 'Errors', Text: 'Retry failed: ' + t, State: 'Failed' }); });
+                    update();
+                });
+            }
+
+            var table = h('table', { class: 'sr-table' }, [h('tr', {}, [h('th', {}, [all]), h('th', { text: 'Video' }), h('th', { text: 'Failed' }), h('th', { text: 'Last failed' })])]);
+            items.forEach(function (item) {
+                var box = h('input', { type: 'checkbox', onchange: update });
+                box._path = item.Path;
+                boxes.push(box);
+                var attempts = h('details', {}, [h('summary', { class: 'sr-folder', text: 'Every attempt (' + item.Attempts.length + ')' })]
+                    .concat(item.Attempts.map(function (a) {
+                        return h('div', { class: 'sr-change' }, [
+                            h('b', { text: a.When + ': ' }), a.Reason || '',
+                            a.LogUrl ? ' ' : null,
+                            a.LogUrl ? h('a', { href: a.LogUrl, target: '_blank', rel: 'noopener', text: a.LogName + ' ↗' }) : (a.LogName ? ' (' + a.LogName + ', no longer kept)' : null)
+                        ]);
+                    })));
+                table.appendChild(h('tr', {}, [
+                    h('td', {}, [box]),
+                    h('td', {}, [
+                        h('div', { class: 'sr-file', text: item.File }),
+                        h('div', { class: 'sr-folder', text: item.Folder }),
+                        h('div', { class: 'sr-change', text: item.LastReason || '' }),
+                        attempts
+                    ]),
+                    h('td', {}, [
+                        h('div', { text: item.Count + (item.Count === 1 ? ' run' : ' runs') + (r.MaxAttempts > 0 ? ' of ' + r.MaxAttempts : '') }),
+                        item.Skipped ? h('div', { class: 'sr-folder', text: 'Skipped by runs now' }) : null
+                    ]),
+                    h('td', { text: item.LastFailed })
+                ]));
+            });
+            var scroller = h('div', { class: 'sr-scroll' }, [table]);
+            list.appendChild(h('div', { class: 'sr-card' }, [scroller, h('div', { class: 'sr-buttons' }, [retryBtn, laterBtn,
+                h('span', { class: 'sr-muted', text: 'Retry now runs just these (no limit per run). Retry on next run only forgets their failures.' })])]));
+            if (items.length > 10) {
+                scroller.style.maxHeight = '40em';
+                scroller.style.overflowY = 'auto';
+            }
+        }
+
+        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget, subTiming: timingWidget, errors: errorsWidget };
 
         // ---------------------------------------------------------------- draw
 

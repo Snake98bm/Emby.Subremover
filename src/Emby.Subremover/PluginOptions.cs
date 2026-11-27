@@ -241,6 +241,12 @@ namespace Emby.Subremover
         [MaxValue(100000)]
         public int MaxItemsPerRun { get; set; } = 5;
 
+        [DisplayName("Stop trying a video after this many failed runs")]
+        [Description("0 = never stop. A video that fails this many runs in a row is skipped until you retry it below, or its file changes.")]
+        [MinValue(0)]
+        [MaxValue(100)]
+        public int MaxFailedAttempts { get; set; } = 2;
+
         [DisplayName("Only process paths containing")]
         [Description("Only paths containing this text. Several: separate with ';'.")]
         public string OnlyPathContains { get; set; } = string.Empty;

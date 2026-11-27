@@ -43,6 +43,9 @@ namespace Emby.Subremover.Core
         public int NothingToDo { get; set; }
         public int AlreadyDone { get; set; }
         public int Failed { get; set; }
+
+        /// <summary>Videos left alone because they failed too many runs in a row (Errors tab).</summary>
+        public int Skipped { get; set; }
         public string LogFile { get; set; }
 
         /// <summary>Set when the run stopped before checking any videos, e.g. no libraries selected.</summary>
@@ -74,6 +77,9 @@ namespace Emby.Subremover.Core
 
         /// <summary>The timing settings <see cref="TimingChecked"/> was made with; a change checks every file again.</summary>
         public string TimingSignature { get; set; }
+
+        /// <summary>Videos that failed in recent runs, for "Stop trying a video after" and the Errors tab.</summary>
+        public Dictionary<string, FailedVideo> Failures { get; set; } = new Dictionary<string, FailedVideo>(StringComparer.OrdinalIgnoreCase);
 
         private HashSet<string> _madeFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -119,6 +125,7 @@ namespace Emby.Subremover.Core
         {
             Processed.Clear();
             Restored.Clear();
+            Failures.Clear();
         }
 
         /// <summary>
@@ -135,7 +142,9 @@ namespace Emby.Subremover.Core
                 // Copies: a test run may point them at moved videos, and that mustn't reach the real list.
                 Backups = Backups.Select(b => new BackupEntry { OriginalPath = b.OriginalPath, BackupPath = b.BackupPath, CreatedUtc = b.CreatedUtc, Changes = b.Changes }).ToList(),
                 MadeFiles = MadeFiles,
-                OcrFiles = new Dictionary<string, OcrRecord>(OcrFiles, StringComparer.OrdinalIgnoreCase)
+                OcrFiles = new Dictionary<string, OcrRecord>(OcrFiles, StringComparer.OrdinalIgnoreCase),
+                // Test mode skips what a real run would skip; it never adds to the list.
+                Failures = new Dictionary<string, FailedVideo>(Failures, StringComparer.OrdinalIgnoreCase)
             };
             if (recheckEverything) copy.ForgetEverything();
             copy.ApplySettingsSignature(signature);
@@ -175,6 +184,8 @@ namespace Emby.Subremover.Core
                 state.OcrFiles = new Dictionary<string, OcrRecord>(state.OcrFiles ?? new Dictionary<string, OcrRecord>(), StringComparer.OrdinalIgnoreCase);
                 state.AdChecked = new Dictionary<string, FileStamp>(state.AdChecked ?? new Dictionary<string, FileStamp>(), StringComparer.OrdinalIgnoreCase);
                 state.TimingChecked = new Dictionary<string, FileStamp>(state.TimingChecked ?? new Dictionary<string, FileStamp>(), StringComparer.OrdinalIgnoreCase);
+                state.Failures = new Dictionary<string, FailedVideo>(state.Failures ?? new Dictionary<string, FailedVideo>(), StringComparer.OrdinalIgnoreCase);
+                foreach (var f in state.Failures.Values) f.Attempts = f.Attempts ?? new List<FailedAttempt>();
                 return state;
             }
         }

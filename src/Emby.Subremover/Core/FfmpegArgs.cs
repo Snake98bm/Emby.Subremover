@@ -110,9 +110,21 @@ namespace Emby.Subremover.Core
         {
             "-hide_banner", "-nostdin", "-v", "error", "-y", "-i", input,
             "-filter_complex",
-            $"[0:{streamIndex}]graphicsub2text=tessdata_path={tessdataFolder}/:language={tesseractLanguage}:ocr_mode=lstm:recognize=italic[ocr]",
+            $"[0:{streamIndex}]graphicsub2text=tessdata_path={FilterPath(tessdataFolder)}/:language={tesseractLanguage}:ocr_mode=lstm:recognize=italic[ocr]",
             "-map", "[ocr]", "-c:s", "srt", "-f", "srt", output
         };
+
+        /// <summary>
+        /// A folder as a filter option's value inside a filter graph: forward slashes (Windows takes them too), then
+        /// escaped once for the option (\ ' :) and once more for the graph (\ ' [ ] , ;), as ffmpeg's manual asks.
+        /// A plain relative name such as "tessdata" comes out unchanged.
+        /// </summary>
+        internal static string FilterPath(string folder)
+        {
+            var value = (folder ?? string.Empty).Replace('\\', '/').TrimEnd('/');
+            var forOption = System.Text.RegularExpressions.Regex.Replace(value, @"[\\':]", @"\$0");
+            return System.Text.RegularExpressions.Regex.Replace(forOption, @"[\\'\[\],;]", @"\$0");
+        }
 
         // .NET Standard 2.0 has no ProcessStartInfo.ArgumentList, so quote per the Windows/.NET argv rules.
         public static string ToCommandLine(IEnumerable<string> args) => string.Join(" ", args.Select(Quote));

@@ -29,6 +29,7 @@ namespace Emby.Subremover.ScheduledTasks
         private readonly CheckpointStore _checkpoints;
         private readonly Func<ILogger, MediaProcessor> _newProcessor;
         private readonly FfmpegRunner _runner;
+        private readonly FailureLog _failureLog;
         private ILogger _log;
 
         public RemoveSubtitlesTask(ILibraryManager libraryManager, ILogManager logManager, IFfmpegManager ffmpegManager,
@@ -39,6 +40,7 @@ namespace Emby.Subremover.ScheduledTasks
             _embyLog = logManager.GetLogger("SubRemover");
             _log = _embyLog;
             _logDirectory = appPaths.LogDirectoryPath;
+            _failureLog = new FailureLog(_logDirectory);
             _store = new StateStore(appPaths.PluginConfigurationsPath, json);
             var runner = FfmpegRunner.FromEmby(ffmpegManager);
             _runner = runner;
@@ -61,6 +63,8 @@ namespace Emby.Subremover.ScheduledTasks
         {
             // Set when NewVideoWatcher started this run: check only the videos Emby just added.
             var newVideos = Plugin.Instance.NewVideos.Take();
+            // Set by "Retry now" on the Errors tab: the videos above are ones being retried, not new ones.
+            var retry = Plugin.Instance.TakeRetryRun() && newVideos != null;
 
             using (var runLog = new RunLog(_logDirectory, "subremover", _embyLog))
             {
@@ -80,7 +84,7 @@ namespace Emby.Subremover.ScheduledTasks
                 _log = runLog;
                 try
                 {
-                    await Run(runLog, newVideos, cancellationToken, progress).ConfigureAwait(false);
+                    await Run(runLog, newVideos, retry, cancellationToken, progress).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -90,7 +94,7 @@ namespace Emby.Subremover.ScheduledTasks
             }
         }
 
-        private async Task Run(RunLog runLog, ISet<string> newVideos, CancellationToken cancellationToken, IProgress<double> progress)
+        private async Task Run(RunLog runLog, ISet<string> newVideos, bool retry, CancellationToken cancellationToken, IProgress<double> progress)
         {
             var options = Plugin.Instance.Options;
             // Read once: a real run switches the setting off below, but this run still starts over.
@@ -98,7 +102,7 @@ namespace Emby.Subremover.ScheduledTasks
             var processor = _newProcessor(runLog);
             var version = typeof(Plugin).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;
             runLog.Summary("SubRemover {0} starting{1}{2}. Details: {3}", version,
-                newVideos == null ? "" : " for new videos added to the library",
+                newVideos == null ? "" : retry ? " to retry videos from the Errors tab" : " for new videos added to the library",
                 options.DryRun ? " in TEST MODE (no files will be changed)" : "", runLog.FileName);
             // One pre-built string: values such as paths may contain braces.
             _log.Info("SubRemover settings for this run:\n    " + string.Join("\n    ", options.DescribeSettings(LibraryNames())));
@@ -144,7 +148,9 @@ namespace Emby.Subremover.ScheduledTasks
             var items = FindVideos(options, newVideos);
             if (newVideos != null)
             {
-                _log.Info("SubRemover: {0} new video{1} added; {2} of them in the selected libraries and path filter",
+                _log.Info(retry
+                        ? "SubRemover: {0} video{1} to retry; {2} of them in the selected libraries and path filter"
+                        : "SubRemover: {0} new video{1} added; {2} of them in the selected libraries and path filter",
                     newVideos.Count, newVideos.Count == 1 ? "" : "s", items.Count);
             }
             _log.Info("SubRemover: {0} video files to check", items.Count);
@@ -188,6 +194,60 @@ namespace Emby.Subremover.ScheduledTasks
             var checkedBefore = total - items.Count;
             var checkedVideos = new List<string>();
             var lastSaved = DateTime.UtcNow;
+
+            // This run's failures, counted towards "Stop trying a video after" once the run has finished (or stopped),
+            // so a run where nearly everything failed can be told apart from a few bad videos.
+            var failuresThisRun = new List<(string Path, FileStamp Stamp, string Reason)>();
+            void NoteOutcome(string path, Outcome outcome, string reason)
+            {
+                if (options.DryRun) return;
+                if (outcome == Outcome.Failed)
+                {
+                    FileStamp stamp = null;
+                    try { stamp = FileStamp.Of(path); } catch (Exception) { }
+                    failuresThisRun.Add((path, stamp, reason));
+                    return;
+                }
+                if (outcome != Outcome.Changed && outcome != Outcome.NothingToDo) return;
+                // It worked now (it's on the done list): its earlier failures no longer count.
+                bool forgot;
+                lock (state)
+                {
+                    forgot = state.Processed.ContainsKey(path) && FailedVideos.Forget(state, path);
+                    if (forgot) _store.Save(state);
+                }
+                if (forgot) _failureLog.Write($"WORKED   {path}: done now, its earlier failures are forgotten. Log: {runLog.FileName}");
+            }
+            void CountFailures()
+            {
+                if (failuresThisRun.Count == 0) return;
+                var looked = checkedVideos.Count;
+                if (FailedVideos.LooksLikeWholeRunProblem(failuresThisRun.Count, looked))
+                {
+                    _log.Warn($"SubRemover: {failuresThisRun.Count} of the {looked} videos this run looked at failed. That looks like a problem " +
+                              "with the share, the disk or ffmpeg rather than with the videos, so these failures don't count towards " +
+                              "'Stop trying a video after'.");
+                    _failureLog.Write($"RUN      {failuresThisRun.Count} of {looked} videos failed in one run; not counted against the videos (share, disk or ffmpeg problem?). Log: {runLog.FileName}");
+                    failuresThisRun.Clear();
+                    return;
+                }
+                var max = options.MaxFailedAttempts;
+                var now = DateTime.UtcNow;
+                lock (state)
+                {
+                    foreach (var f in failuresThisRun)
+                    {
+                        var record = FailedVideos.Record(state, f.Path, f.Stamp, f.Reason, runLog.FileName, now);
+                        var stops = max > 0 && record.Count >= max;
+                        _failureLog.Write($"FAILED   {f.Path}: run {record.Count}" + (max > 0 ? $" of {max}" : "") + $" - {FailedVideos.Shorten(f.Reason, 2000)}" +
+                                          (stops ? " - SKIPPED from now on until retried or the file changes" : "") + $". Log: {runLog.FileName}");
+                        if (stops)
+                            _log.Warn($"SubRemover: {f.Path} has failed {record.Count} runs in a row; later runs skip it until you retry it on the Errors tab or the file changes.");
+                    }
+                    _store.Save(state);
+                }
+                failuresThisRun.Clear();
+            }
             void SaveCheckpoint()
             {
                 if (checkpoint == null) return;
@@ -225,6 +285,7 @@ namespace Emby.Subremover.ScheduledTasks
                         position++;
 
                         Outcome outcome;
+                        string unexpected = null;
                         try
                         {
                             var video = await check.ConfigureAwait(false);
@@ -240,7 +301,12 @@ namespace Emby.Subremover.ScheduledTasks
                             CheckAhead();
                             _log.ErrorException("SubRemover: unexpected error on {0}", ex, item.Path);
                             outcome = Outcome.Failed;
+                            unexpected = "unexpected error: " + ex.Message;
                         }
+                        var failReason = processor.TakeProblem(item.Path);
+                        NoteOutcome(item.Path, outcome, failReason ?? unexpected);
+                        if (outcome == Outcome.SkippedAfterFailures && !options.DryRun)
+                            _failureLog.Write($"SKIPPED  {item.Path}: failed too many runs in a row. Log: {runLog.FileName}");
                         counts[outcome]++;
                         checkedVideos.Add(item.Path);
                         checkpoint?.Checked.Add(item.Path);
@@ -258,6 +324,7 @@ namespace Emby.Subremover.ScheduledTasks
                 {
                     // Stopped: keep where it got to for next time.
                     SaveCheckpoint();
+                    CountFailures();
                     throw;
                 }
                 finally
@@ -272,6 +339,7 @@ namespace Emby.Subremover.ScheduledTasks
             // Finished (or stopped at the limit): nothing to continue. Only this run's own checkpoint: a run for new videos
             // never loaded it, so an interrupted full run keeps its place.
             if (checkpoint != null) _checkpoints.Delete();
+            CountFailures();
 
             if (options.RemoveSubtitleAds) RemoveSubtitleAds(options, state, checkedVideos, cancellationToken);
             if (options.FixSubtitleTiming) await FixSubtitleTiming(options, state, checkedVideos, cancellationToken).ConfigureAwait(false);
@@ -287,13 +355,15 @@ namespace Emby.Subremover.ScheduledTasks
                 NothingToDo = counts[Outcome.NothingToDo],
                 AlreadyDone = counts[Outcome.AlreadyDone],
                 Failed = counts[Outcome.Failed],
+                Skipped = counts[Outcome.SkippedAfterFailures],
                 LogFile = runLog.FileName
             };
             _store.Save(state);
 
             progress.Report(100);
-            runLog.Summary("SubRemover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed. Details: {5}",
-                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed], runLog.FileName);
+            runLog.Summary("SubRemover finished: {0} changed, {1} would change (test mode), {2} nothing to do, {3} already done, {4} failed, {5} skipped after failing before (Errors tab). Details: {6}",
+                counts[Outcome.Changed], counts[Outcome.WouldChange], counts[Outcome.NothingToDo], counts[Outcome.AlreadyDone], counts[Outcome.Failed],
+                counts[Outcome.SkippedAfterFailures], runLog.FileName);
             _log.Info(processor.Totals.Describe(options.DryRun));
         }
 

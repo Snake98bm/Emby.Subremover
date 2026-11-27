@@ -145,6 +145,55 @@ namespace Emby.Subremover
         public bool HideDetails { get; set; }
     }
 
+    [Route("/SubRemover/Failures", "GET", Summary = "Videos that failed in recent runs, for the Errors tab", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class GetFailures : IReturn<FailureListDto>
+    {
+    }
+
+    [Route("/SubRemover/Failures/Retry", "POST", Summary = "Forgets the failures of the ticked videos and, if asked, retries them now", IsHidden = true)]
+    [Authenticated(Roles = "Admin")]
+    public class RetryFailures : IReturn<StatusDto>
+    {
+        /// <summary>The ticked videos' paths, one per line, as GetFailures listed them.</summary>
+        public string Paths { get; set; }
+
+        /// <summary>Start a run for them now; otherwise the next run tries them.</summary>
+        public bool Now { get; set; }
+    }
+
+    public class FailureListDto
+    {
+        public int MaxAttempts { get; set; }
+        public List<FailureRowDto> Items { get; set; }
+
+        /// <summary>subremover-failures.log, newest lines first.</summary>
+        public string LogText { get; set; }
+        public string LogOpenUrl { get; set; }
+        public string LogDownloadUrl { get; set; }
+    }
+
+    public class FailureRowDto
+    {
+        public string Path { get; set; }
+        public string File { get; set; }
+        public string Folder { get; set; }
+        public int Count { get; set; }
+        public bool Skipped { get; set; }
+        public string FirstFailed { get; set; }
+        public string LastFailed { get; set; }
+        public string LastReason { get; set; }
+        public List<FailureAttemptDto> Attempts { get; set; }
+    }
+
+    public class FailureAttemptDto
+    {
+        public string When { get; set; }
+        public string Reason { get; set; }
+        public string LogName { get; set; }
+        public string LogUrl { get; set; }
+    }
+
     public class PageDto
     {
         public string Title { get; set; }
@@ -445,6 +494,44 @@ namespace Emby.Subremover
                 DownloadUrl = GetSubremoverLog.Link(name, key, download: true)
             };
         }
+
+        public object Get(GetFailures request)
+        {
+            var plugin = Plugin;
+            var max = plugin.Options.MaxFailedAttempts;
+            var key = plugin.LogLinkKey.Current(DateTime.UtcNow);
+            var logs = new HashSet<string>(SafeLogList());
+            string When(DateTime utc) => utc.ToLocalTime().ToString("d MMM HH:mm", CultureInfo.InvariantCulture);
+            return new FailureListDto
+            {
+                MaxAttempts = max,
+                Items = plugin.FailedVideoList().Select(kv => new FailureRowDto
+                {
+                    Path = kv.Key,
+                    File = Path.GetFileName(kv.Key),
+                    Folder = Path.GetDirectoryName(kv.Key),
+                    Count = kv.Value.Count,
+                    Skipped = max > 0 && kv.Value.Count >= max,
+                    FirstFailed = When(kv.Value.FirstUtc),
+                    LastFailed = When(kv.Value.LastUtc),
+                    LastReason = FailedVideos.Shorten(kv.Value.LastReason()),
+                    Attempts = (kv.Value.Attempts ?? new List<FailedAttempt>()).AsEnumerable().Reverse().Select(a => new FailureAttemptDto
+                    {
+                        When = When(a.Utc),
+                        Reason = FailedVideos.Shorten(a.Reason, 4000),
+                        LogName = a.LogFile,
+                        // Older run logs are deleted (30 kept); no link to one that's gone.
+                        LogUrl = a.LogFile != null && logs.Contains(a.LogFile) ? GetSubremoverLog.Link(a.LogFile, key, download: false) : null
+                    }).ToList()
+                }).ToList(),
+                LogText = plugin.FailureLog.ReadNewestFirst(),
+                LogOpenUrl = GetSubremoverLog.Link(FailureLog.FileName, key, download: false),
+                LogDownloadUrl = GetSubremoverLog.Link(FailureLog.FileName, key, download: true)
+            };
+        }
+
+        public object Post(RetryFailures request) =>
+            StatusDto.From(Plugin.RetryFailed((request.Paths ?? "").Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries), request.Now));
 
         private List<string> SafeLogList()
         {
