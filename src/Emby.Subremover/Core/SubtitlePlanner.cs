@@ -11,6 +11,10 @@ namespace Emby.Subremover.Core
         public bool KeepUndefined { get; set; } = true;
         public bool KeepForcedAnyLanguage { get; set; }
         public bool RemoveHearingImpaired { get; set; }
+
+        /// <summary>With <see cref="RemoveHearingImpaired"/>: remove SDH even where no regular track in its language stays.</summary>
+        public bool RemoveHearingImpairedAlways { get; set; }
+
         public bool RemoveCommentary { get; set; }
         public bool ExtractTextSubtitles { get; set; }
         public bool RemoveExtractedFromVideo { get; set; }
@@ -46,7 +50,9 @@ namespace Emby.Subremover.Core
         public string Signature() => string.Join("|",
             string.Join(",", KeepLanguages.OrderBy(l => l, StringComparer.OrdinalIgnoreCase)),
             KeepUndefined, KeepForcedAnyLanguage, RemoveHearingImpaired, RemoveCommentary, ExtractTextSubtitles, RemoveExtractedFromVideo, OcrPictureSubtitles, OcrReplaceExisting, OcrRedoOlder, MakeRegularDefault, MarkDefaultInName, DefaultLanguage, GuessLanguages, GuessForFilesOnly, PreferExistingFiles,
-            FixWrongTags, RemoveUnknownWrongTags, CheckEveryTextSubtitle);
+            FixWrongTags, RemoveUnknownWrongTags, CheckEveryTextSubtitle)
+            // Only added when on, so turning it off (or upgrading) doesn't make every video get checked again.
+            + (RemoveHearingImpaired && RemoveHearingImpairedAlways ? "|SdhAlways" : "");
     }
 
     public class ExtractJob
@@ -311,7 +317,7 @@ namespace Emby.Subremover.Core
 
         private static bool ShouldKeep(ProbeStream s, PlannerSettings settings, ISet<string> regularLanguages)
         {
-            if (settings.RemoveHearingImpaired && s.IsHearingImpaired && regularLanguages.Contains(s.Language)) return false;
+            if (settings.RemoveHearingImpaired && s.IsHearingImpaired && (settings.RemoveHearingImpairedAlways || regularLanguages.Contains(s.Language))) return false;
             return KeptByLanguage(s, settings);
         }
 

@@ -102,6 +102,11 @@ namespace Emby.Subremover
         [Description("Only when a regular track in that language stays.")]
         public bool RemoveHearingImpaired { get; set; }
 
+        [DisplayName("...even when it's the only full subtitle in that language")]
+        [Description("Also removes SDH when no regular track in that language stays, e.g. a movie whose only full English subtitle is SDH.")]
+        [VisibleCondition(nameof(RemoveHearingImpaired), SimpleCondition.IsTrue)]
+        public bool RemoveHearingImpairedAlways { get; set; }
+
         [DisplayName("Remove commentary subtitles")]
         [Description("Even in languages you keep.")]
         public bool RemoveCommentary { get; set; }

@@ -118,6 +118,11 @@ namespace Emby.Subremover
                 "SDH subtitles also describe sounds and name speakers; closed captions (titles with 'CC') count as SDH. An SDH track is " +
                 "only removed when the video also has a regular track in that language. If SDH is the only English track, for example, " +
                 "it's kept."),
+            (SettingsTabId.Subtitles, "...even when it's the only full subtitle in that language",
+                "Removes SDH tracks in every case, also when no regular track in that language stays. A movie whose only full English " +
+                "subtitle is SDH is then left with its forced English track (if it has one) or no English subtitles. Videos already " +
+                "checked are checked again on the next run. Subtitle files made earlier (such as '.pgs.eng.sdh.srt' from OCR) aren't " +
+                "deleted; delete them yourself if you don't want them."),
             (SettingsTabId.Subtitles, "Remove commentary subtitles",
                 "Removes subtitle tracks marked as commentary or titled 'Commentary', even in a language you keep."),
             (SettingsTabId.Subtitles, "Make the regular subtitle track the default",

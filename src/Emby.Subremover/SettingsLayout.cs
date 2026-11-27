@@ -94,6 +94,7 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.KeepForcedAnyLanguage)),
                     H("Remove"),
                     F(nameof(PluginOptions.RemoveHearingImpaired)),
+                    F(nameof(PluginOptions.RemoveHearingImpairedAlways)),
                     F(nameof(PluginOptions.RemoveCommentary)),
                     H("Default track"),
                     F(nameof(PluginOptions.MakeRegularDefault)),
