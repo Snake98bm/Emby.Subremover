@@ -156,7 +156,7 @@ namespace Emby.Subremover.Core
                     using (var reader = new StreamReader(stream, Encoding.UTF8))
                     {
                         var lines = reader.ReadToEnd().Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries);
-                        return string.Join(Environment.NewLine, lines.Reverse().Take(maxLines));
+                        return string.Join(Environment.NewLine, Enumerable.Reverse(lines).Take(maxLines));
                     }
                 }
             }
