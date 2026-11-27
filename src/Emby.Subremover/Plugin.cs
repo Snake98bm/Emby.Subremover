@@ -125,6 +125,65 @@ namespace Emby.Subremover
             return RunStatus.Started(DateTime.Now);
         }
 
+        // ---- Errors tab
+
+        internal const string ErrorsCaption = "Errors";
+
+        // Set by "Retry now": the next run's videos are retries, not new videos (only changes how its log words it).
+        private int _retryRun;
+
+        internal bool TakeRetryRun() => System.Threading.Interlocked.Exchange(ref _retryRun, 0) == 1;
+
+        internal FailureLog FailureLog => new FailureLog(_applicationHost.Resolve<IApplicationPaths>().LogDirectoryPath);
+
+        /// <summary>The videos on the Errors tab, most recent failure first.</summary>
+        internal List<KeyValuePair<string, FailedVideo>> FailedVideoList() =>
+            _state.Load().Failures.OrderByDescending(kv => kv.Value.LastUtc).ThenBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase).ToList();
+
+        /// <summary>
+        /// "Retry now" / "Retry on next run": forgets the failures of the chosen videos (only ones on the list: the paths
+        /// come from the browser) and, for Retry now, starts a run for just those.
+        /// </summary>
+        internal StatusItem RetryFailed(IEnumerable<string> paths, bool runNow)
+        {
+            var worker = RemoveTaskWorker();
+            // A running task holds the state in memory and would write the failures back when it saves.
+            if ((worker != null && worker.State != TaskState.Idle) || !TaskGate.TryEnter())
+                return new StatusItem(ErrorsCaption, "Nothing changed: " + TaskGate.BusyMessage + ".", ItemStatus.Warning);
+
+            List<string> chosen;
+            try
+            {
+                var state = _state.Load();
+                chosen = (paths ?? Enumerable.Empty<string>())
+                    .Select(p => state.Failures.Keys.FirstOrDefault(k => string.Equals(k, p?.Trim(), StringComparison.OrdinalIgnoreCase)))
+                    .Where(p => p != null)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (chosen.Count == 0)
+                    return new StatusItem(ErrorsCaption, "Nothing changed: none of the ticked videos are on the list any more. Click Refresh.", ItemStatus.Warning);
+                foreach (var p in chosen) FailedVideos.Forget(state, p);
+                _state.Save(state);
+            }
+            finally
+            {
+                TaskGate.Exit();
+            }
+
+            var log = FailureLog;
+            foreach (var p in chosen) log.Write((runNow ? "RETRY    " : "FORGOTTEN ") + p + (runNow ? ": retry started from the Errors tab" : ": failures forgotten; the next run tries it again"));
+
+            var what = chosen.Count == 1 ? "1 video" : chosen.Count + " videos";
+            if (!runNow)
+                return new StatusItem(ErrorsCaption, $"Forgot the failures of {what}. The next run tries {(chosen.Count == 1 ? "it" : "them")} again.", ItemStatus.Succeeded);
+
+            NewVideos.AddRange(chosen);
+            System.Threading.Interlocked.Exchange(ref _retryRun, 1);
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<RemoveSubtitlesTask>();
+            return new StatusItem(ErrorsCaption,
+                $"Retrying {what}, started at {DateTime.Now:HH:mm}. Click Refresh when it's done; its log is on the Logs tab.", ItemStatus.InProgress);
+        }
+
         // The button pressed for the next "Download hash-matched subtitles" run: true = count only; null = scheduled run.
         private bool? _hashRunMode;
 

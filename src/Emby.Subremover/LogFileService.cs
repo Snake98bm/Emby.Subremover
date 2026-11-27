@@ -43,13 +43,15 @@ namespace Emby.Subremover
                 throw new SecurityException("This link has expired. Open SubRemover's settings page again for a new one.");
 
             // Only SubRemover's own logs, by exact name: no paths, no other files.
-            if (string.IsNullOrEmpty(request.Name) || !RunLog.ListFiles(_logDirectory).Contains(request.Name))
+            // ...and the Errors tab's subremover-failures.log, also by its exact name.
+            var failureLog = request.Name == Core.FailureLog.FileName;
+            if (string.IsNullOrEmpty(request.Name) || (!failureLog && !RunLog.ListFiles(_logDirectory).Contains(request.Name)))
                 throw new FileNotFoundException("No SubRemover log with that name.");
 
             var headers = new Dictionary<string, string>();
             if (request.Download) headers["Content-Disposition"] = "attachment; filename=\"" + request.Name + "\"";
 
-            var text = RunLog.ReadAll(_logDirectory, request.Name);
+            var text = failureLog ? new Core.FailureLog(_logDirectory).ReadAll() : RunLog.ReadAll(_logDirectory, request.Name);
             return _results.GetResult(Request, new MemoryStream(Encoding.UTF8.GetBytes(text)), "text/plain; charset=utf-8", headers);
         }
     }

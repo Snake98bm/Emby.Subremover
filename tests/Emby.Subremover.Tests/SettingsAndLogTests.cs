@@ -308,12 +308,13 @@ public sealed class SettingsAndLogTests : IDisposable
     {
         var tabs = SettingsLayout.Page();
 
-        Assert.Equal(new[] { "Run", "Subtitles", "Subtitle files", "Backups", "Logs" }, tabs.Select(t => t.Name));
+        Assert.Equal(new[] { "Run", "Subtitles", "Subtitle files", "Backups", "Errors", "Logs" }, tabs.Select(t => t.Name));
         Assert.Equal(SettingsLayout.RunWidget, tabs[0].Entries[0].Text);
         Assert.Equal(nameof(PluginOptions.DryRun), tabs[0].Entries[1].Field.Name);
         Assert.Contains(tabs[1].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.QuickSetupWidget);
         Assert.Contains(tabs[3].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.RestoreWidget);
-        Assert.Contains(tabs[4].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.LogsWidget);
+        Assert.Contains(tabs[4].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.ErrorsWidget);
+        Assert.Contains(tabs[5].Entries, e => e.Kind == SettingsLayout.Widget && e.Text == SettingsLayout.LogsWidget);
     }
 
     [Fact]

@@ -299,6 +299,19 @@ namespace Emby.Subremover
                 "already done), and its backup, 'already done' and 'restored' records and the subtitle files SubRemover made for it " +
                 "follow it, so it isn't checked again and can still be restored. A backup next to the video has to have moved with " +
                 "it. A renamed file counts as a new video."),
+            (SettingsTabId.Errors, "Stop trying a video after this many failed runs",
+                "Some videos fail every night the same way, for example when the rewritten file comes out a different length " +
+                "and the original is kept. Each failed run counts one; once a video reaches this number, runs skip it and it no " +
+                "longer takes up a place under 'Max videos to change per run'. A run that works for it, a retry, or a change to " +
+                "the file (same name, new size or date) starts its count again. A run where 25 or more videos fail, and at least " +
+                "half of the ones it looked at, is taken as a problem with the share, the disk or ffmpeg, so its failures don't " +
+                "count. Test mode skips the same videos but never adds to the count. 0 never stops trying."),
+            (SettingsTabId.Errors, "Videos that failed",
+                "Every video that failed in a recent run: how many runs in a row, the reason the last time, and each attempt with " +
+                "a link to that run's log. 'Retry now' forgets the failures and starts a run for just the ticked videos (no limit " +
+                "per run); 'Retry on next run' only forgets them, so the next scheduled run tries them again. Neither works while " +
+                "a SubRemover task is running. 'What's been going on' is subremover-failures.log in Emby's log folder: every " +
+                "failure, skip and retry, newest first."),
             (SettingsTabId.Logs, "Logs",
                 "Shows the last run. Pick an older run to see its log. The links under it open the whole log in a new window or " +
                 "download it. The newest 30 are kept."),

@@ -16,6 +16,7 @@ namespace Emby.Subremover
         Subtitles,
         SubtitleFiles,
         Backups,
+        Errors,
         Logs
     }
 
@@ -38,6 +39,7 @@ namespace Emby.Subremover
         internal const string HashWidget = "hashSubs";
         internal const string AdsWidget = "subAds";
         internal const string TimingWidget = "subTiming";
+        internal const string ErrorsWidget = "errors";
 
         internal sealed class TabLayout
         {
@@ -140,6 +142,14 @@ namespace Emby.Subremover
                     F(nameof(PluginOptions.SubtitleBackupRetentionDays)),
                     H("Restore"),
                     W(RestoreWidget)
+                }
+            },
+            new TabLayout
+            {
+                Id = SettingsTabId.Errors, Name = "Errors", Entries = new[]
+                {
+                    F(nameof(PluginOptions.MaxFailedAttempts)),
+                    W(ErrorsWidget)
                 }
             },
             new TabLayout

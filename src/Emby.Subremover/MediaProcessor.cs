@@ -20,7 +20,10 @@ namespace Emby.Subremover
         NothingToDo,
         WouldChange,
         Changed,
-        Failed
+        Failed,
+
+        /// <summary>Left alone: it failed "Stop trying a video after" runs in a row (Errors tab).</summary>
+        SkippedAfterFailures
     }
 
     public class MediaProcessor
@@ -39,6 +42,15 @@ namespace Emby.Subremover
 
         /// <summary>What this processor did (or would do in test mode) so far; one processor is made per run.</summary>
         public RunTotals Totals { get; } = new RunTotals();
+
+        // Why each video that failed in this run failed, for the Errors tab. Several videos are checked at once.
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _problems =
+            new System.Collections.Concurrent.ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        private void NoteProblem(string path, string problem) => _problems[path] = problem;
+
+        /// <summary>Why <paramref name="path"/> failed in this run, if it did; forgotten once taken.</summary>
+        public string TakeProblem(string path) => _problems.TryRemove(path, out var p) ? p : null;
 
         public MediaProcessor(FfmpegRunner runner, ILibraryMonitor libraryMonitor, IProviderManager providerManager,
             IFileSystem fileSystem, IJsonSerializer json, ILogger log, Tessdata tessdata, SearchOcrStore searchOcr = null,
@@ -104,6 +116,21 @@ namespace Emby.Subremover
             bool alreadyDone;
             lock (state) alreadyDone = state.Processed.TryGetValue(path, out var done) && done.Matches(stamp);
             if (alreadyDone) return Checked.Finished(Outcome.AlreadyDone);
+
+            bool skip;
+            int failedRuns;
+            lock (state)
+            {
+                skip = FailedVideos.ShouldSkip(state, path, stamp, options.MaxFailedAttempts);
+                failedRuns = skip ? state.Failures[path].Count : 0;
+            }
+            if (skip)
+            {
+                // One pre-built string: paths may contain braces.
+                _log.Info($"SubRemover: skipping {path}: it failed {failedRuns} runs in a row (Stop trying a video after: {options.MaxFailedAttempts}). " +
+                          "Retry it on the Errors tab; it's also tried again if the file changes.");
+                return Checked.Finished(Outcome.SkippedAfterFailures);
+            }
 
             var before = await Probe(path, ct).ConfigureAwait(false);
             if (before == null) return Checked.Finished(Outcome.Failed);
@@ -313,6 +340,7 @@ namespace Emby.Subremover
                 else
                 {
                     _log.Warn("SubRemover: OCR of {0} in {1} failed: {2}. Will retry next run.", job.Stream.Describe(), path, problem);
+                    NoteProblem(path, $"OCR of {job.Stream.Describe()} failed: {problem}");
                     ocrFailed = true;
                     lock (Totals) Totals.OcrFailed++;
                 }
@@ -414,6 +442,7 @@ namespace Emby.Subremover
             if (!result.Success)
             {
                 _log.Error("SubRemover: ffprobe failed for {0} (exit {1}): {2}", path, result.ExitCode, result.StdErr);
+                NoteProblem(path, $"ffprobe couldn't read the file (exit {result.ExitCode}): {result.StdErr}");
                 return null;
             }
             try
@@ -423,6 +452,7 @@ namespace Emby.Subremover
             catch (Exception ex)
             {
                 _log.ErrorException("SubRemover: could not read ffprobe output for {0}", ex, path);
+                NoteProblem(path, "couldn't read ffprobe's output: " + ex.Message);
                 return null;
             }
         }
@@ -468,6 +498,7 @@ namespace Emby.Subremover
             }
 
             _log.Error("SubRemover: extracting {0} from {1} failed ({2}). Video left unchanged.", job.Stream.Describe(), videoPath, problem);
+            NoteProblem(videoPath, $"extracting {job.Stream.Describe()} failed: {problem}");
             TryDelete(temp);
             return ExtractOutcome.Failed;
         }
@@ -479,6 +510,7 @@ namespace Emby.Subremover
             if (muxer == null)
             {
                 _log.Warn("SubRemover: unsupported container for {0}, skipping", path);
+                NoteProblem(path, "unsupported container");
                 return false;
             }
 
@@ -493,6 +525,7 @@ namespace Emby.Subremover
                 if (failure != null)
                 {
                     _log.Error("SubRemover: ffmpeg failed for {0} ({1}). Original left unchanged.", path, failure);
+                    NoteProblem(path, "rewriting the video with ffmpeg failed: " + failure);
                     TryDelete(temp);
                     return false;
                 }
@@ -508,6 +541,7 @@ namespace Emby.Subremover
                 if (problem != null)
                 {
                     _log.Error("SubRemover: new file for {0} failed verification ({1}). Original left unchanged.", path, problem);
+                    NoteProblem(path, $"the rewritten file failed verification ({problem}); the original was left unchanged");
                     TryDelete(temp);
                     return false;
                 }
@@ -531,6 +565,7 @@ namespace Emby.Subremover
             if (!result.Success)
             {
                 _log.Error("SubRemover: {0}: {1}", path, result.Message);
+                NoteProblem(path, "swapping in the new file failed: " + result.Message);
                 return false;
             }
 

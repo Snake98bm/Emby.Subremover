@@ -40,7 +40,8 @@ namespace Emby.Subremover
                 ? $"{lastRun.WouldChange} would change"
                 : $"{lastRun.Changed} changed";
             var text = $"Last run {When(lastRun.FinishedUtc)}{(lastRun.DryRun ? " (test mode)" : "")}: {counts}, " +
-                       $"{lastRun.NothingToDo + lastRun.AlreadyDone} already fine, {lastRun.Failed} failed. Log: {lastRun.LogFile}";
+                       $"{lastRun.NothingToDo + lastRun.AlreadyDone} already fine, {lastRun.Failed} failed" +
+                       (lastRun.Skipped > 0 ? $", {lastRun.Skipped} skipped after failing before (Errors tab)" : "") + $". Log: {lastRun.LogFile}";
             return new StatusItem(Caption, text, lastRun.Failed > 0 ? ItemStatus.Warning : ItemStatus.Succeeded);
         }
 
