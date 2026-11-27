@@ -786,7 +786,60 @@ define([], function () {
             }
         }
 
-        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget, subTiming: timingWidget, errors: errorsWidget };
+        // ---- Updates: the status line, Check for updates now, and Install now when a newer release is out.
+
+        function showUpdate(u) {
+            var box = el('srUpdateStatus');
+            if (!box || !u) return;
+            showStatus(box, u.Status);
+            var install = el('srUpdateInstall');
+            install.style.display = u.Available ? '' : 'none';
+            install.textContent = '⬇ Install v' + (u.Available || '') + ' now';
+            var notes = el('srUpdateNotes');
+            notes.style.display = u.ReleaseUrl ? '' : 'none';
+            if (u.ReleaseUrl) notes.href = u.ReleaseUrl;
+        }
+
+        function startUpdate(install) {
+            // Unsaved changes are saved first, so the check goes by "Install updates automatically" as the page shows it.
+            (dirty ? save() : Promise.resolve(true)).then(function (ok) {
+                if (!ok) return;
+                postJson('SubRemover/Update', { Install: install }).then(function (u) {
+                    showUpdate(u);
+                    pollUpdate(u.Status);
+                }, function (err) {
+                    errorText(err).then(function (t) { showStatus(el('srUpdateStatus'), { Caption: 'Updates', Text: 'Could not start: ' + t, State: 'Failed' }); });
+                });
+            });
+        }
+
+        var updateTimer;
+        function pollUpdate(status) {
+            clearTimeout(updateTimer);
+            if (hidden || !status || status.State !== 'InProgress') return;
+            updateTimer = setTimeout(function () {
+                getJson('SubRemover/Update/Status').then(function (u) {
+                    showUpdate(u);
+                    pollUpdate(u.Status);
+                }, function () { pollUpdate(status); });
+            }, 3000);
+        }
+
+        function updateWidget() {
+            var node = h('div', {}, [
+                h('div', { class: 'sr-buttons' }, [
+                    h('button', { type: 'button', class: 'sr-btn', text: '🔄 Check for updates now', onclick: function () { startUpdate(false); } }),
+                    h('button', { type: 'button', class: 'sr-btn sr-primary', id: 'srUpdateInstall', style: 'display:none', onclick: function () { startUpdate(true); } }),
+                    h('a', { class: 'sr-btn', id: 'srUpdateNotes', target: '_blank', rel: 'noopener', style: 'display:none', text: 'Release notes ↗' })
+                ]),
+                h('div', { class: 'sr-status', id: 'srUpdateStatus', role: 'status' })
+            ]);
+            // Drawn once it's on the page, since showUpdate finds its parts by id.
+            setTimeout(function () { showUpdate(page.UpdateStatus); }, 0);
+            return node;
+        }
+
+        var WIDGETS = { run: runWidget, quickSetup: quickSetupWidget, restore: restoreWidget, logs: logsWidget, hashSubs: hashWidget, subAds: adsWidget, subTiming: timingWidget, errors: errorsWidget, update: updateWidget };
 
         // ---------------------------------------------------------------- draw
 
@@ -838,6 +891,7 @@ define([], function () {
                 pollHash(p.HashStatus);
                 pollAds(p.AdStatus && p.AdStatus.Status);
                 pollTiming(p.TimingStatus && p.TimingStatus.Status);
+                pollUpdate(p.UpdateStatus && p.UpdateStatus.Status);
             }, function (err) {
                 errorText(err).then(function (t) { el('srLoadError').textContent = 'Couldn\'t load the settings: ' + t; });
             });
@@ -901,6 +955,7 @@ define([], function () {
             clearTimeout(hashTimer);
             clearTimeout(adTimer);
             clearTimeout(timingTimer);
+            clearTimeout(updateTimer);
         });
     };
 });

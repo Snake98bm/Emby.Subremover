@@ -125,6 +125,69 @@ namespace Emby.Subremover
             return RunStatus.Started(DateTime.Now);
         }
 
+        // ---- Updates from GitHub releases
+
+        internal UpdateStateStore UpdateStore =>
+            new UpdateStateStore(_applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, _applicationHost.Resolve<IJsonSerializer>());
+
+        /// <summary>
+        /// The DLL Emby loaded SubRemover from, which an update replaces: the file of that name in the plugins folder (where
+        /// Emby looks at startup), else the file it was loaded from.
+        /// </summary>
+        internal string PluginFile()
+        {
+            var pluginsPath = _applicationHost.Resolve<IApplicationPaths>().PluginsPath;
+            var location = typeof(Plugin).Assembly.Location;
+            var candidates = new List<string>();
+            if (!string.IsNullOrEmpty(location)) candidates.Add(Path.Combine(pluginsPath, Path.GetFileName(location)));
+            candidates.Add(Path.Combine(pluginsPath, Updater.AssetName));
+            if (!string.IsNullOrEmpty(location)) candidates.Add(location);
+            return candidates.FirstOrDefault(File.Exists) ?? candidates[0];
+        }
+
+        internal Updater CreateUpdater() => new Updater(
+            new GitHubReleaseSource(_applicationHost.Resolve<IJsonSerializer>()),
+            UpdateStore,
+            PluginVersion.Parse(VersionText),
+            PluginFile(),
+            Path.Combine(_applicationHost.Resolve<IApplicationPaths>().PluginConfigurationsPath, "subremover-update"));
+
+        // Set by "Install now": the next update run installs even when installing automatically is off.
+        private int _updateInstallClick;
+
+        internal bool TakeUpdateInstallClick() => System.Threading.Interlocked.Exchange(ref _updateInstallClick, 0) == 1;
+
+        private IScheduledTaskWorker UpdateTaskWorker() =>
+            _applicationHost.Resolve<ITaskManager>().ScheduledTasks.FirstOrDefault(w => w.ScheduledTask is UpdateTask);
+
+        /// <summary>"Check for updates now" (install = false) or "Install now".</summary>
+        internal StatusItem StartUpdate(bool install)
+        {
+            var worker = UpdateTaskWorker();
+            if (worker != null && worker.State != TaskState.Idle) return UpdateStatus().Status;
+            if (install) System.Threading.Interlocked.Exchange(ref _updateInstallClick, 1);
+            _applicationHost.Resolve<ITaskManager>().QueueIfNotRunning<UpdateTask>();
+            return new StatusItem(Updater.Caption, install ? "Installing the newest release…" : "Checking GitHub for a newer release…", ItemStatus.InProgress);
+        }
+
+        /// <summary>The update status line, the version an Install now button would install (or null), and the release's page.</summary>
+        internal (StatusItem Status, string Available, string ReleaseUrl) UpdateStatus()
+        {
+            try
+            {
+                var state = UpdateStore.Load();
+                var worker = UpdateTaskWorker();
+                if (worker != null && worker.State != TaskState.Idle)
+                    return (new StatusItem(Updater.Caption, UpdateTask.Live ?? "Checking for updates…", ItemStatus.InProgress), null, state.ReleaseUrl);
+                var (text, status, available) = Updater.Describe(state, PluginVersion.Parse(VersionText), Options.AutoUpdate);
+                return (new StatusItem(Updater.Caption, text, status), available, state.ReleaseUrl);
+            }
+            catch (Exception ex)
+            {
+                return (new StatusItem(Updater.Caption, "Update status unavailable: " + ex.Message, ItemStatus.Unknown), null, null);
+            }
+        }
+
         // ---- Errors tab
 
         internal const string ErrorsCaption = "Errors";

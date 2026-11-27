@@ -18,8 +18,13 @@ namespace Emby.Subremover.Core
         private static readonly MethodInfo SetMode = typeof(File).GetMethods()
             .FirstOrDefault(m => m.Name == "SetUnixFileMode" && m.GetParameters().Length == 2 && m.GetParameters()[0].ParameterType == typeof(string));
 
+        /// <summary>Runs a program: its exit code, standard output and standard error.</summary>
+        internal delegate (int ExitCode, string Output, string Error) Runner(string exe, string arguments);
+
         /// <returns>null when everything was copied (or on Windows), otherwise a note about what couldn't be.</returns>
-        public static string CopyFrom(string source, string target)
+        public static string CopyFrom(string source, string target) => CopyFrom(source, target, RunProcess);
+
+        internal static string CopyFrom(string source, string target, Runner run)
         {
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return null;
 
@@ -40,16 +45,33 @@ namespace Emby.Subremover.Core
                 note = "could not copy permissions: " + (ex.InnerException ?? ex).Message;
             }
 
+            // The new file usually has the original's owner and group already, and on network shares (CIFS/SMB, some NFS)
+            // chown fails even then, so it's only tried when they differ.
+            var before = Owner(source, run);
+            var after = Owner(target, run);
+            if (before != null && before == after) return note;
+
             // Only root can give a file away to another user; changing to a group Emby belongs to may still work.
-            var chown = Run("chown", "--reference=" + FfmpegArgs.Quote(source) + " " + FfmpegArgs.Quote(target));
-            if (chown != null)
+            // By ids when stat gave them: BusyBox's chown (Emby's Docker image) has no --reference.
+            var chown = run("chown", (before ?? "--reference=" + FfmpegArgs.Quote(source)) + " " + FfmpegArgs.Quote(target));
+            if (chown.ExitCode != 0)
             {
-                note = (note == null ? "" : note + "; ") + "could not copy owner/group: " + chown;
+                var error = string.IsNullOrWhiteSpace(chown.Error) ? "chown exited with " + chown.ExitCode : chown.Error.Trim();
+                note = (note == null ? "" : note + "; ") +
+                       $"the file was updated, but it keeps owner/group {after ?? "?"} instead of the original's {before ?? "?"} ({error})";
             }
             return note;
         }
 
-        private static string Run(string exe, string arguments)
+        /// <summary>"1000:100" (user and group ids), or null when it can't be told (e.g. macOS's stat).</summary>
+        private static string Owner(string path, Runner run)
+        {
+            var stat = run("stat", "-c %u:%g " + FfmpegArgs.Quote(path));
+            var owner = stat.Output?.Trim();
+            return stat.ExitCode == 0 && !string.IsNullOrEmpty(owner) && owner.Contains(":") ? owner : null;
+        }
+
+        private static (int, string, string) RunProcess(string exe, string arguments)
         {
             try
             {
@@ -61,14 +83,16 @@ namespace Emby.Subremover.Core
                     RedirectStandardOutput = true
                 }))
                 {
-                    var error = proc.StandardError.ReadToEnd();
+                    var errorTask = proc.StandardError.ReadToEndAsync();
+                    var output = proc.StandardOutput.ReadToEnd();
+                    var error = errorTask.Result;
                     proc.WaitForExit(10000);
-                    return proc.ExitCode == 0 ? null : error.Trim();
+                    return (proc.ExitCode, output, error);
                 }
             }
             catch (Exception ex)
             {
-                return ex.Message;
+                return (-1, null, ex.Message);
             }
         }
     }
